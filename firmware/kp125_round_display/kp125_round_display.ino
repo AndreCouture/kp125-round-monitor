@@ -34,7 +34,7 @@ struct PlugCfg { const char* name; const char* ip; };
 const PlugCfg PLUGS[] = { PLUGS_INIT };   // up to ~10 fit the status dots
 const size_t N_PLUGS = sizeof(PLUGS) / sizeof(PLUGS[0]);
 
-const float    MAX_W        = 3000;   // full-scale of the gauge (e.g. your circuit limit)
+const float    MAX_W        = 1440;   // gauge full-scale: 15 A x 120 V x 80% continuous-load limit
 const uint32_t POLL_MS      = 3000;   // plug polling interval
 const uint32_t CYCLE_MS     = 3000;   // how long each plug is shown
 // ------------------------------------------------
@@ -66,21 +66,14 @@ const uint16_t COL_RED   = rgb(240, 70, 60);
 struct Reading { float w = 0, v = 0, a = 0, kwh = 0; bool online = false; bool seen = false; };
 Reading readings[N_PLUGS];
 portMUX_TYPE readMux = portMUX_INITIALIZER_UNLOCKED;
-KasaConn conns[N_PLUGS];   // protocol + KLAP session per plug; poll task only
+KasaConn conns[N_PLUGS];   // protocol + session per plug; poll task only
 // Explicit prototype: stops the Arduino preprocessor emitting one above struct Reading
 bool readPlug(const char* ip, KasaConn& conn, Reading& r, String& err);
 
 bool readPlug(const char* ip, KasaConn& conn, Reading& r, String& err) {
-  String reply;
-  if (!kasaRequest(ip, conn, "{\"emeter\":{\"get_realtime\":{}}}", reply, err)) return false;
-  JsonDocument doc;
-  if (deserializeJson(doc, reply)) { err = "reply is not JSON"; return false; }
-  JsonObject rt = doc["emeter"]["get_realtime"];
-  if (rt.isNull() || rt["err_code"].as<int>() != 0) { err = "no emeter data: " + reply.substring(0, 120); return false; }
-  r.w   = rt["power_mw"].as<float>()   / 1000.0f;
-  r.v   = rt["voltage_mv"].as<float>() / 1000.0f;
-  r.a   = rt["current_ma"].as<float>() / 1000.0f;
-  r.kwh = rt["total_wh"].as<float>()   / 1000.0f;
+  KasaEnergy e;
+  if (!kasaReadEnergy(ip, conn, e, err)) return false;
+  r.w = e.w; r.v = e.v; r.a = e.a; r.kwh = e.kwh;
   return true;
 }
 
@@ -89,6 +82,9 @@ void connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) delay(250);
+  // TPAP checks the plug's certificate dates, so it needs real time (UTC is fine)
+  static bool sntp = false;
+  if (WiFi.status() == WL_CONNECTED && !sntp) { configTime(0, 0, "pool.ntp.org", "time.google.com"); sntp = true; }
 }
 
 // Runs on core 0 so slow/offline plugs never freeze the display
@@ -222,7 +218,8 @@ void setup() {
   gfx->fillScreen(COL_BG);
   gfx->flush();
 
-  xTaskCreatePinnedToCore(pollTask, "poll", 8192, nullptr, 1, nullptr, 0);
+  // 16 KB: TPAP's elliptic-curve and certificate code needs more than 8 KB
+  xTaskCreatePinnedToCore(pollTask, "poll", 16384, nullptr, 1, nullptr, 0);
 }
 
 void loop() {

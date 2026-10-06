@@ -31,6 +31,9 @@ Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 #error "Copy secrets.example.h to secrets.h and fill in your Wi-Fi and plug IPs"
 #endif
 #include "kasa.h"   // after secrets.h: uses KASA_USER / KASA_PASS
+#if TPAP_SELFTEST
+#include "tpap_selftest.h"   // build with -DTPAP_SELFTEST=1 to run the TPAP known-answer test at boot
+#endif
 
 // ---------- your settings ----------
 struct Plug {
@@ -38,7 +41,7 @@ struct Plug {
   const char* ip;     // give each plug a DHCP reservation
   float power_w = NAN, voltage_v = NAN, current_a = NAN, total_kwh = NAN;
   bool online = false;
-  KasaConn conn;      // protocol (legacy/KLAP) and KLAP session, found on first contact
+  KasaConn conn;      // protocol (legacy/KLAP/TPAP) and session, found on first contact
 };
 
 #ifdef PLUGS_INIT
@@ -55,19 +58,9 @@ const uint32_t POLL_MS = 5000;   // 2-10 s is plenty
 String lastErr;   // why the last readPlug() failed, for the serial log
 
 bool readPlug(Plug& p) {
-  String reply;
-  if (!kasaRequest(p.ip, p.conn, "{\"emeter\":{\"get_realtime\":{}}}", reply, lastErr)) return false;
-
-  JsonDocument doc;
-  if (deserializeJson(doc, reply)) { lastErr = "reply is not JSON"; return false; }
-  JsonObject rt = doc["emeter"]["get_realtime"];
-  if (rt.isNull() || rt["err_code"].as<int>() != 0) { lastErr = "no emeter data: " + reply.substring(0, 120); return false; }
-
-  // KP125 reports milli-units; older HS110 uses plain units, handled as fallback
-  p.power_w   = rt["power_mw"].is<float>()   ? rt["power_mw"].as<float>() / 1000.0f   : rt["power"].as<float>();
-  p.voltage_v = rt["voltage_mv"].is<float>() ? rt["voltage_mv"].as<float>() / 1000.0f : rt["voltage"].as<float>();
-  p.current_a = rt["current_ma"].is<float>() ? rt["current_ma"].as<float>() / 1000.0f : rt["current"].as<float>();
-  p.total_kwh = rt["total_wh"].is<float>()   ? rt["total_wh"].as<float>() / 1000.0f   : rt["total"].as<float>();
+  KasaEnergy e;
+  if (!kasaReadEnergy(p.ip, p.conn, e, lastErr)) return false;
+  p.power_w = e.w; p.voltage_v = e.v; p.current_a = e.a; p.total_kwh = e.kwh;
   return true;
 }
 
@@ -124,6 +117,9 @@ void connectWiFi() {
   Serial.print("WiFi");
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) { delay(250); Serial.print('.'); }
   Serial.println(WiFi.status() == WL_CONNECTED ? " ok " + WiFi.localIP().toString() : " failed");
+  // TPAP checks the plug's certificate dates, so it needs real time (UTC is fine)
+  static bool sntp = false;
+  if (WiFi.status() == WL_CONNECTED && !sntp) { configTime(0, 0, "pool.ntp.org", "time.google.com"); sntp = true; }
 }
 
 #if USE_OLED
@@ -144,12 +140,20 @@ void drawOled(float total) {
 }
 #endif
 
+// TPAP's elliptic-curve and certificate code needs more than the default 8 KB loop stack.
+// (Kept below the struct definitions: the macro defines a function, and Arduino inserts its
+// generated prototypes above the first function.)
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 void setup() {
   Serial.begin(115200);
 #if USE_OLED
   Wire.begin();                         // default SDA 21, SCL 22
   oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   oled.clearDisplay(); oled.display();
+#endif
+#if TPAP_SELFTEST
+  tpap::selfTest();
 #endif
   connectWiFi();
   if (WiFi.status() == WL_CONNECTED) discoverPlugs();

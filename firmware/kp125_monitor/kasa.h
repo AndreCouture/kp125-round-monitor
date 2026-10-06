@@ -1,19 +1,23 @@
-// Kasa local protocols: legacy (TCP 9999, XOR autokey) and KLAP (HTTP 80, AES-128-CBC).
-// Identical copy in each sketch folder (Arduino can't include across sketches) - keep in sync.
+// Kasa local protocols: legacy (TCP 9999, XOR autokey), KLAP (HTTP 80, AES-128-CBC) and
+// TPAP (SPAKE2+, AES-128-CCM; see tpap.h). Identical copy in each sketch folder
+// (Arduino can't include across sketches) - keep in sync.
 //
-// kasaRequest() tries legacy first; if port 9999 refuses the connection it switches that
-// plug to KLAP and stays there. KLAP needs KASA_USER / KASA_PASS (TP-Link account) in
-// secrets.h; blank and factory-default credentials are tried as a fallback, as python-kasa does.
+// kasaReadEnergy() tries legacy first; if port 9999 refuses the connection it asks the plug
+// which family it is and uses TPAP or KLAP from then on. KLAP and TPAP need KASA_USER /
+// KASA_PASS (TP-Link account) in secrets.h; for KLAP, blank and factory-default credentials
+// are tried as a fallback, as python-kasa does. TPAP also needs the clock set (SNTP).
 //
 // KLAP reference: python-kasa kasa/transports/klaptransport.py (KlapTransport = v1 md5 auth,
 // KlapTransportV2 = sha256/sha1 auth; both are accepted, whichever the plug's hash matches).
 #pragma once
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <mbedtls/md.h>
 #include <mbedtls/aes.h>
 #include <esp_random.h>
 #include <vector>
+#include "tpap.h"
 
 #ifndef KASA_USER
 #define KASA_USER ""
@@ -222,19 +226,74 @@ static bool klapQuery(const char* ip, KlapSession& s, const char* cmd, String& r
 
 // ---------- public interface ----------
 struct KasaConn {
-  enum Proto : uint8_t { UNKNOWN, LEGACY, KLAP } proto = UNKNOWN;
+  enum Proto : uint8_t { UNKNOWN, LEGACY, KLAP, TPAP } proto = UNKNOWN;
+  bool smart = false;   // SMART JSON ({"method":...}) rather than legacy IOT ({"emeter":...})
   KlapSession klap;
+  tpap::Session tpap;
 };
 
-// Send one JSON command to the plug at ip, return its JSON reply. err says why on failure.
-static bool kasaRequest(const char* ip, KasaConn& c, const char* cmd, String& reply, String& err) {
-  if (c.proto == KasaConn::KLAP) return klapQuery(ip, c.klap, cmd, reply, err);
-  int r = legacyQuery(ip, cmd, reply, err);
-  if (r == 1) { c.proto = KasaConn::LEGACY; return true; }
-  if (r == -1 && c.proto == KasaConn::UNKNOWN) {   // port 9999 refused: try KLAP
-    String klapErr;
-    if (klapQuery(ip, c.klap, cmd, reply, klapErr)) { c.proto = KasaConn::KLAP; return true; }
-    err += "; " + klapErr;
+struct KasaEnergy { float w = 0, v = 0, a = 0, kwh = 0; };
+
+static const char* IOT_ENERGY_CMD = "{\"emeter\":{\"get_realtime\":{}}}";
+static const char* SMART_ENERGY_CMD = "{\"method\":\"get_emeter_data\"}";
+
+// Asks a plug that refused port 9999 which family it is: 2 = SMART preferring TPAP,
+// 1 = SMART (KLAP), 0 = not SMART (KLAP with legacy IOT requests)
+static int smartFamily(const char* ip) {
+  const char* req = "{\"method\":\"login\",\"params\":{\"sub_method\":\"discover\"}}";
+  tpap::Bytes body;
+  if (tpap::post(ip, 80, "/", "application/json", (const uint8_t*)req, strlen(req), body) != 200) return 0;
+  JsonDocument d;
+  if (deserializeJson(d, (const char*)body.data(), body.size()) || (d["error_code"] | -1) != 0) return 0;
+  JsonObject r = d["result"];
+  return (r["tpap_preferred"] | false) && r["tpap"].is<JsonObject>() ? 2 : 1;
+}
+
+static bool parseEnergy(const String& reply, bool smart, KasaEnergy& e, String& err) {
+  JsonDocument doc;
+  if (deserializeJson(doc, reply)) { err = "reply is not JSON"; return false; }
+  JsonObject rt;
+  int ec;
+  if (smart) { rt = doc["result"]; ec = doc["error_code"] | -1; }
+  else       { rt = doc["emeter"]["get_realtime"]; ec = rt["err_code"] | -1; }
+  if (rt.isNull() || ec != 0) { err = "no energy data: " + reply.substring(0, 120); return false; }
+  // KP125/KP125M report milli-units; older HS110 plain units, handled as fallback
+  e.w   = rt["power_mw"].is<float>()   ? rt["power_mw"].as<float>() / 1000.0f   : rt["power"].as<float>();
+  e.v   = rt["voltage_mv"].is<float>() ? rt["voltage_mv"].as<float>() / 1000.0f : rt["voltage"].as<float>();
+  e.a   = rt["current_ma"].is<float>() ? rt["current_ma"].as<float>() / 1000.0f : rt["current"].as<float>();
+  float wh = rt["total_wh"].is<float>() ? rt["total_wh"].as<float>() : rt["energy_wh"].as<float>();
+  e.kwh = wh ? wh / 1000.0f : rt["total"].as<float>();
+  return true;
+}
+
+// Read the plug's live power. The protocol is picked on first contact and kept:
+// legacy (TCP 9999) -> if refused, TPAP when the plug prefers it, otherwise KLAP.
+static bool kasaReadEnergy(const char* ip, KasaConn& c, KasaEnergy& e, String& err) {
+  String reply;
+  if (c.proto == KasaConn::UNKNOWN) {
+    int r = legacyQuery(ip, IOT_ENERGY_CMD, reply, err);
+    if (r == 0) return false;                      // timeout or bad reply: try again next poll
+    if (r == 1) c.proto = KasaConn::LEGACY;
+    else {                                         // port 9999 refused
+      int fam = smartFamily(ip);
+      c.proto = fam == 2 ? KasaConn::TPAP : KasaConn::KLAP;
+      c.smart = fam > 0;
+      reply = "";
+    }
   }
-  return false;
+  bool ok = true;
+  switch (c.proto) {
+    case KasaConn::LEGACY:
+      if (reply.isEmpty()) ok = legacyQuery(ip, IOT_ENERGY_CMD, reply, err) == 1;
+      break;
+    case KasaConn::KLAP:
+      ok = klapQuery(ip, c.klap, c.smart ? SMART_ENERGY_CMD : IOT_ENERGY_CMD, reply, err);
+      break;
+    case KasaConn::TPAP:
+      ok = tpap::query(ip, KASA_USER, KASA_PASS, c.tpap, SMART_ENERGY_CMD, reply, err);
+      break;
+    default:
+      ok = false;
+  }
+  return ok && parseEnergy(reply, c.smart, e, err);
 }
