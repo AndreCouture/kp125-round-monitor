@@ -21,9 +21,9 @@ docs/photos/board.jpeg          photo of the board back
 ## Current status
 | Piece | State |
 |---|---|
-| `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + discovery; cannot read the owner's TPAP plugs yet. |
-| `kp125_round_display.ino` | Compiles and runs; panel verified with touch-board pins. `DEMO_MODE` for layout checks. Layout/flicker review with the owner pending. |
-| TPAP transport | Working locally via python-kasa PR #1592 branch; ESP32 port in progress. |
+| `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + TPAP + discovery; reads the owner's KP125M plugs. |
+| `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH; `DEMO_MODE` for layout checks. |
+| TPAP transport | Ported to the ESP32 (`tpap.h`, see `docs/tpap-design.md`); known-answer test passes, reads the "Bambu" plug live (.252 not yet configured on the board). Pending local-LLM gateway review. |
 | `display_stand.scad` | Written, **never rendered** (no OpenSCAD in the chat sandbox). Board dimensions are **estimates**. |
 
 ## Tasks, in order

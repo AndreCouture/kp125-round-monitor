@@ -13,7 +13,7 @@ Claude Code will pick up the context, task list and current status from `CLAUDE.
 ## Doing it by hand
 **Firmware (Arduino IDE)**
 - Boards Manager: *esp32 by Espressif*. Board: **ESP32S3 Dev Module**, Flash Size 16MB, PSRAM enabled.
-- Libraries: **GFX Library for Arduino** (moononournation), **ArduinoJson** v7, **U8g2** (olikraus; fonts for the round display).
+- Libraries: **LovyanGFX** (lovyan03) and **ArduinoJson** v7. The display fonts (Inter, anti-aliased) are generated into `fonts_inter.h` by `tools/make_vlw.py`.
 - Open `firmware/kp125_monitor` first, set Wi-Fi + plug IPs, flash, and check the Serial Monitor (115200) shows readings.
 - Then flash `firmware/kp125_round_display` with the same settings, and set `MAX_W` to your gauge full-scale (e.g. circuit limit).
 - If upload fails: hold BOOT, tap RESET, release BOOT, upload again.
