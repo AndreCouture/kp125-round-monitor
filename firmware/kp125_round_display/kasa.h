@@ -293,6 +293,48 @@ static bool kasaReadUsage(const char* ip, KasaConn& c, KasaUsage& u, String& err
   return true;
 }
 
+// Daily energy history (SMART plugs): get_energy_data with interval 1440 returns one Wh value per
+// day for the whole quarter that starts at `start` (epoch of local midnight, 1st day of the quarter;
+// verified on KP125M fw 1.4.1), future days 0. Fills wh with that array.
+static bool kasaReadDaily(const char* ip, KasaConn& c, time_t start, time_t end, std::vector<float>& wh,
+                          String& err) {
+  if (!c.smart || (c.proto != KasaConn::TPAP && c.proto != KasaConn::KLAP)) {
+    err = "daily history needs a SMART plug";
+    return false;
+  }
+  char cmd[160];
+  snprintf(cmd, sizeof(cmd),
+           "{\"method\":\"get_energy_data\",\"params\":{\"start_timestamp\":%lld,\"end_timestamp\":%lld,\"interval\":1440}}",
+           (long long)start, (long long)end);
+  String reply;
+  bool ok = c.proto == KasaConn::TPAP ? tpap::query(ip, KASA_USER, KASA_PASS, c.tpap, cmd, reply, err)
+                                      : klapQuery(ip, c.klap, cmd, reply, err);
+  if (!ok) return false;
+  JsonDocument d;
+  if (deserializeJson(d, reply) || (d["error_code"] | -1) != 0) { err = "no history: " + reply.substring(0, 120); return false; }
+  JsonObject r = d["result"];
+  JsonArray data = r["data"];
+  if (data.isNull() || data.size() > 100 || (r["interval"] | 0) != 1440 ||
+      (long long)(r["start_timestamp"] | 0LL) != (long long)start) {
+    err = "unexpected history reply";
+    return false;
+  }
+  wh.clear();
+  for (JsonVariant v : data) wh.push_back(v.as<float>());
+  return true;
+}
+
+// Send any JSON request over the plug's protocol, which an earlier successful kasaReadEnergy()
+// picked. Development aid (kp125_monitor's serial console); not used by normal polling.
+static bool kasaRawQuery(const char* ip, KasaConn& c, const char* json, String& reply, String& err) {
+  switch (c.proto) {
+    case KasaConn::LEGACY: return legacyQuery(ip, json, reply, err) == 1;
+    case KasaConn::KLAP:   return klapQuery(ip, c.klap, json, reply, err);
+    case KasaConn::TPAP:   return tpap::query(ip, KASA_USER, KASA_PASS, c.tpap, json, reply, err);
+    default:               err = "protocol not known yet (no successful poll)"; return false;
+  }
+}
+
 // Read the plug's live power. The protocol is picked on first contact and kept:
 // legacy (TCP 9999) -> if refused, TPAP when the plug prefers it, otherwise KLAP.
 static bool kasaReadEnergy(const char* ip, KasaConn& c, KasaEnergy& e, String& err) {

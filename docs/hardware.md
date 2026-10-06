@@ -50,3 +50,11 @@ Both plugs are **KP125M(US)**, firmware **1.4.1 Build 260721 Rel.06565**, `devic
 
 TPAP is SPAKE2+ (P-256) based. As of 2026-10-05 python-kasa has no released TPAP transport ([PR #1592](https://github.com/python-kasa/python-kasa/pull/1592) open; context in [issue #1733](https://github.com/python-kasa/python-kasa/issues/1733)). The KLAP check that matters is `tpap_preferred: false` from the HTTP discover call: in that issue, plugs reporting `false` worked over plain KLAP (login version 2).
 - Poll no faster than every ~2 s.
+
+## SMART energy requests used by the firmware (KP125M fw 1.4.1, verified 2026-10-06)
+Sent over TPAP as plain JSON:
+- `{"method":"get_emeter_data"}` → `power_mw`, `voltage_mv`, `current_ma`, `energy_wh`, `energy_mwh` (the energy counters are month-to-date).
+- `{"method":"get_energy_usage"}` → `current_power` (mW), `today_energy` / `month_energy` (Wh), plus `_mwh` variants and runtimes.
+- `{"method":"get_energy_data","params":{"start_timestamp":S,"end_timestamp":E,"interval":1440}}` → `data`: **Wh per day for the whole quarter** starting at S, future days 0, today partial. S must be the **true epoch of local midnight on the first day of the quarter** (local time written as if UTC shifts the data). `interval: 43200` with S = 1 January gives 12 monthly values; hourly (`60`) returned nothing for today.
+
+`kp125_monitor` built with `-DSERIAL_CONSOLE=1` accepts `<plug number> <json>` on the serial line and prints the plug's reply, which is how these were checked.

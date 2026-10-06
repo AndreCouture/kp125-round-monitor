@@ -161,7 +161,34 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) discoverPlugs();
 }
 
+#if SERIAL_CONSOLE
+// Development console, only in builds with -DSERIAL_CONSOLE=1 (it can send ANY command, including
+// switching a plug off). Type "<plug number> <json>", e.g.  1 {"method":"get_device_time"}
+void serialConsole() {
+  static String line;
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == '\r') continue;
+    if (ch != '\n') { if (line.length() < 1024) line += ch; continue; }
+    int sp = line.indexOf(' ');
+    int n = sp > 0 ? line.substring(0, sp).toInt() : 0;
+    if (n >= 1 && n <= (int)N_PLUGS) {
+      String reply, err;
+      Plug& p = plugs[n - 1];
+      if (kasaRawQuery(p.ip, p.conn, line.substring(sp + 1).c_str(), reply, err)) Serial.printf("<< %s\n", reply.c_str());
+      else Serial.printf("!! %s\n", err.c_str());
+    } else if (line.length()) {
+      Serial.printf("usage: <plug 1..%u> <json>\n", (unsigned)N_PLUGS);
+    }
+    line = "";
+  }
+}
+#endif
+
 void loop() {
+#if SERIAL_CONSOLE
+  serialConsole();
+#endif
   if (N_PLUGS == 0) {              // discovery-only mode
     delay(30000);
     connectWiFi();

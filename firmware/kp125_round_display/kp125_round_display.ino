@@ -7,7 +7,8 @@
 //   TASK  - task meters (all plugs, and one per plug: swipe up/down to pick); hold HOLD_MS to
 //           reset the shown one. Each counts energy, time, avg and max, and survives reboots.
 //   TODAY - kWh, peak/low power;  MONTH - kWh, per plug
-// TODAY and MONTH return to the gauge after PAGE_TIMEOUT_MS without a touch.
+//   7 DAYS - daily kWh bars from the plugs' own history (swipe up/down: all plugs / each plug)
+// TODAY, MONTH and 7 DAYS return to the gauge after PAGE_TIMEOUT_MS without a touch.
 // The backlight dims to NIGHT_BRIGHTNESS between NIGHT_FROM_H and NIGHT_TO_H; a touch wakes it.
 //
 // Libraries (Arduino Library Manager):
@@ -63,6 +64,8 @@ const float    RATE_PER_KWH = 0.11142;  // flat rate in CURRENCY per kWh (11.142
 const char*    CURRENCY     = "$";
 const uint32_t POLL_MS      = 3000;   // plug polling interval
 const uint32_t USAGE_MS     = 60000;  // how often to fetch today's/month's kWh from the plugs
+const uint32_t HISTORY_MS   = 30UL * 60000;   // how often to refresh the 7-day history
+const uint32_t HISTORY_RETRY_MS = 120000;     // retry sooner after a failed history fetch
 const uint32_t PAGE_TIMEOUT_MS = 20000;   // back to the gauge after this long without a touch
 // Local time zone (POSIX TZ) for the daily peak/low reset at midnight; plugs report America/Toronto
 const char*    TZ_INFO      = "EST5EDT,M3.2.0,M11.1.0";
@@ -156,6 +159,15 @@ struct DayStats {
   int yday = -1;   // local day of year these belong to
 };
 DayStats dayStats;
+
+// Last 7 days of energy per plug from the plug's own daily counters ([6] = today, [0] = 6 days ago).
+// NAN = unknown (not fetched yet, or that quarter couldn't be read).
+struct DayHistory {
+  float wh[7];
+  int yday = -1;            // local day of year that [6] refers to
+  bool supported = true;    // false for plugs without daily history (legacy protocol)
+};
+DayHistory history[N_PLUGS];
 
 // Task meters: energy since the last reset, from the plugs' own counters (each plug's increase
 // since the previous reading, so a missed poll loses nothing). One meter for all plugs plus
@@ -284,6 +296,89 @@ void updateTaskPeaks(const float* w) {
   portEXIT_CRITICAL(&readMux);
 }
 
+// ---------- daily history ----------
+// Days since 1970-01-01 for a civil date (H. Hinnant's algorithm): day arithmetic that DST can't skew
+long daysFromCivil(int y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  const long era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + (long)doe - 719468;
+}
+
+// Epoch of local midnight; mon0 is 0-based and may be out of range (mktime normalises, day 0 = last
+// day of the previous month)
+time_t localMidnight(int y, int mon0, int d) {
+  struct tm a = {};
+  a.tm_year = y - 1900;
+  a.tm_mon = mon0;
+  a.tm_mday = d;
+  a.tm_isdst = -1;
+  return mktime(&a);
+}
+
+// Fetch plug i's last 7 days (the plug reports per quarter; in a quarter's first 6 days the previous
+// quarter is read too). On failure the old values are kept. Poll task only.
+bool fetchHistory(size_t i, String& err) {
+  time_t now = time(nullptr);
+  struct tm t;
+  localtime_r(&now, &t);
+  int y = t.tm_year + 1900, qm = t.tm_mon / 3 * 3;   // quarter's first month, 0-based
+  long today = daysFromCivil(y, t.tm_mon + 1, t.tm_mday), qDay = daysFromCivil(y, qm + 1, 1);
+  std::vector<float> cur, prev;
+  if (!kasaReadDaily(PLUGS[i].ip, conns[i], localMidnight(y, qm, 1), localMidnight(y, t.tm_mon, t.tm_mday), cur, err))
+    return false;
+  long prevDay = 0;
+  if (today - qDay < 6) {
+    int py = qm == 0 ? y - 1 : y, pm = qm == 0 ? 9 : qm - 3;
+    prevDay = daysFromCivil(py, pm + 1, 1);
+    String perr;
+    if (!kasaReadDaily(PLUGS[i].ip, conns[i], localMidnight(py, pm, 1), localMidnight(y, qm, 0), prev, perr))
+      prev.clear();                                   // those older days just stay unknown
+  }
+  float wh[7];
+  for (int k = 0; k < 7; k++) {
+    long day = today - 6 + k, ci = day - qDay, pi = day - prevDay;
+    if (ci >= 0 && ci < (long)cur.size())                     wh[k] = cur[ci];
+    else if (ci < 0 && pi >= 0 && pi < (long)prev.size())     wh[k] = prev[pi];
+    else                                                      wh[k] = NAN;
+  }
+  portENTER_CRITICAL(&readMux);
+  memcpy(history[i].wh, wh, sizeof(wh));
+  history[i].yday = t.tm_yday;
+  history[i].supported = true;
+  portEXIT_CRITICAL(&readMux);
+  return true;
+}
+
+// Refresh plug i's history when due: first time, after midnight, every HISTORY_MS (sooner after a
+// failure). Needs the clock (dates) and a reachable plug.
+void maybeFetchHistory(size_t i) {
+  static uint32_t lastAt[N_PLUGS];
+  static bool tried[N_PLUGS], okLast[N_PLUGS];
+  static int lastYday[N_PLUGS];
+  if (!tpap::clockReady()) return;
+  time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  bool due = !tried[i] || lt.tm_yday != lastYday[i] ||
+             millis() - lastAt[i] > (okLast[i] ? HISTORY_MS : HISTORY_RETRY_MS);
+  if (!due) return;
+  tried[i] = true;
+  lastAt[i] = millis();
+  lastYday[i] = lt.tm_yday;
+  if (!conns[i].smart) {                              // legacy plug: no daily history
+    portENTER_CRITICAL(&readMux);
+    history[i].supported = false;
+    portEXIT_CRITICAL(&readMux);
+    return;
+  }
+  String err;
+  okLast[i] = fetchHistory(i, err);
+  if (!okLast[i]) Serial.printf("%-8s history: %s\n", PLUGS[i].name, err.c_str());
+}
+
 // Runs on core 0 so slow/offline plugs never freeze the display
 void pollTask(void*) {
   uint32_t lastSave = millis();
@@ -306,6 +401,15 @@ void pollTask(void*) {
       demoKwh[i] += r.w * POLL_MS / 3.6e9;   // integrate the fake power into a fake counter
       r.v = 120; r.a = r.w / 120; r.kwh = demoKwh[i];
       r.todayKwh = 1.23f * (i + 1); r.monthKwh = 34.5f * (i + 1);
+      if (tpap::clockReady()) {                // fake 7-day history, with one unknown day
+        time_t now = time(nullptr);
+        struct tm lt;
+        localtime_r(&now, &lt);
+        portENTER_CRITICAL(&readMux);
+        for (int k = 0; k < 7; k++) history[i].wh[k] = k == 2 ? NAN : 900 + 600 * sinf(k + i);
+        history[i].yday = lt.tm_yday;
+        portEXIT_CRITICAL(&readMux);
+      }
 #else
       r.online = (WiFi.status() == WL_CONNECTED) && readPlug(PLUGS[i].ip, conns[i], r, err);
       if (r.online && usageDue) {
@@ -314,6 +418,7 @@ void pollTask(void*) {
         if (kasaReadUsage(PLUGS[i].ip, conns[i], u, uerr)) { r.todayKwh = u.todayKwh; r.monthKwh = u.monthKwh; }
         else Serial.printf("%-8s usage: %s\n", PLUGS[i].name, uerr.c_str());
       }
+      if (r.online) maybeFetchHistory(i);
 #endif
       r.seen = true;
       portENTER_CRITICAL(&readMux);
@@ -432,7 +537,7 @@ bool touchRead(int16_t& x, int16_t& y) {
 
 // ---------- UI ----------
 const float ARC_START = 135, ARC_SWEEP = 270;   // gauge opens at the bottom
-enum Page { PAGE_GAUGE, PAGE_TASK, PAGE_TODAY, PAGE_MONTH, N_PAGES };
+enum Page { PAGE_GAUGE, PAGE_TASK, PAGE_TODAY, PAGE_MONTH, PAGE_HISTORY, N_PAGES };
 int page = PAGE_GAUGE;
 uint32_t lastTouch = 0;
 const uint32_t HOLD_MS = 1200;                  // press-and-hold on TASK resets the task meter
@@ -440,6 +545,8 @@ float holdProgress = 0;                         // 0..1 while holding on TASK, f
 uint32_t taskResetAt = 0;                       // when the last reset fired (brief "started" flash)
 Task taskSnap[N_TASKS];
 size_t taskSel = 0;                             // meter shown on TASK: 0 = all plugs, 1 + i = plug i
+size_t histSel = 0;                             // history shown: 0 = all plugs, 1 + i = plug i
+DayHistory histSnap[N_PLUGS];
 float shownW = 0;                               // animated value
 size_t cycleIdx = 0;                            // plug shown on the gauge page (swipe up/down)
 Reading snap[N_PLUGS];                          // UI-side copies, refreshed every frame
@@ -508,6 +615,7 @@ void handleTouch() {
     if (N_PLUGS < 2) return;
     if (page == PAGE_GAUGE)     cycleIdx = (cycleIdx + (dy < 0 ? 1 : N_PLUGS - 1)) % N_PLUGS;
     else if (page == PAGE_TASK) { taskSel = (taskSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS; taskResetAt = 0; }
+    else if (page == PAGE_HISTORY) histSel = (histSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS;
     else return;
   } else if (abs(dx) < 25 && abs(dy) < 25 && millis() - t0 < 800) page = (page + 1) % N_PAGES;
   else return;
@@ -624,6 +732,64 @@ void drawTask() {
   textCentered(flash ? "started" : "hold to reset", 201, F_SMALL, flash ? COL_GREEN : COL_DIM);
 }
 
+// Last 7 days as bars, for all plugs or one (swipe up/down). Today's bar uses the live today_energy.
+void drawHistory() {
+  const uint16_t COL_BAR = rgb(80, 140, 220), COL_BAR_TODAY = rgb(150, 200, 255);
+  char buf[40], cost[20];
+  snprintf(buf, sizeof(buf), "7 DAYS - %s", histSel == 0 ? "ALL" : PLUGS[histSel - 1].name);
+  for (char* c = buf; *c; c++) *c = toupper((unsigned char)*c);
+  textCentered(buf, 58, F_TITLE, COL_DIM);
+  if (!tpap::clockReady()) { textCentered("waiting for clock", 124, F_TEXT, COL_DIM); return; }
+
+  time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  float wh[7];
+  bool supported = false, any = false;
+  for (int k = 0; k < 7; k++) {
+    float sum = 0;
+    bool known = false;
+    for (size_t i = 0; i < N_PLUGS; i++) {
+      if (histSel != 0 && histSel != i + 1) continue;
+      if (!histSnap[i].supported) continue;
+      supported = true;
+      float v = NAN;
+      if (k == 6 && !isnan(snap[i].todayKwh)) v = snap[i].todayKwh * 1000;          // live today
+      else if (histSnap[i].yday == lt.tm_yday) v = histSnap[i].wh[k];                 // not stale
+      if (!isnan(v)) { sum += v; known = true; }
+    }
+    wh[k] = known ? sum : NAN;
+    any |= known;
+  }
+  if (!supported) { textCentered("--", 112, F_NUM, COL_DIM); textCentered("no daily history", 146, F_TEXT, COL_DIM); return; }
+  if (!any) { textCentered("loading...", 124, F_TEXT, COL_DIM); return; }
+
+  float total = 0, maxv = 0;
+  for (float v : wh) if (!isnan(v)) { total += v; maxv = max(maxv, v); }
+  if (costText(total / 1000, cost, sizeof(cost))) snprintf(buf, sizeof(buf), "%.1f kWh  %s", total / 1000, cost);
+  else snprintf(buf, sizeof(buf), "%.1f kWh", total / 1000);
+  textCentered(buf, 80, F_TEXT, COL_TEXT);
+
+  const int barW = 14, pitch = 20, base = 172, maxH = 62, x0 = 120 - (7 * pitch - (pitch - barW)) / 2;
+  static const char DAYS[] = "SMTWTFS";
+  for (int k = 0; k < 7; k++) {
+    int x = x0 + k * pitch, cx = x + barW / 2;
+    if (!isnan(wh[k])) {
+      int h = maxv > 0 ? max(2, (int)lroundf(wh[k] / maxv * maxH)) : 2;
+      uint16_t col = k == 6 ? COL_BAR_TODAY : COL_BAR;
+      if (h >= 6) gfx->fillSmoothRoundRect(x, base - h, barW, h, 3, col);
+      else gfx->fillRect(x, base - h, barW, h, col);
+      float kwh = wh[k] / 1000;
+      snprintf(buf, sizeof(buf), kwh < 10 ? "%.1f" : "%.0f", kwh);
+      textAt(buf, cx, base - h - 4, F_SMALL, COL_DIM, textdatum_t::baseline_center);
+    } else {
+      textAt("-", cx, base - 4, F_SMALL, COL_DIM, textdatum_t::baseline_center);    // unknown day
+    }
+    char d[2] = {DAYS[(lt.tm_wday - (6 - k) + 14) % 7], 0};
+    textAt(d, cx, 191, F_SMALL, k == 6 ? COL_TEXT : COL_DIM, textdatum_t::baseline_center);
+  }
+}
+
 void drawMonth() {
   static const char* MONTHS[] = {"JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY",
                                  "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"};
@@ -655,6 +821,7 @@ void drawUI() {
   memcpy(snap, readings, sizeof(snap));
   statsSnap = dayStats;
   memcpy(taskSnap, tasks, sizeof(taskSnap));
+  memcpy(histSnap, history, sizeof(histSnap));
   portEXIT_CRITICAL(&readMux);
 
   // TASK stays up (it's watched during a task); the other pages fall back to the gauge
@@ -670,7 +837,10 @@ void drawUI() {
 
   gfx->fillScreen(COL_BG);
   if (page != PAGE_GAUGE) {
-    if (page == PAGE_TASK) drawTask(); else if (page == PAGE_TODAY) drawToday(); else drawMonth();
+    if (page == PAGE_TASK) drawTask();
+    else if (page == PAGE_TODAY) drawToday();
+    else if (page == PAGE_MONTH) drawMonth();
+    else drawHistory();
     drawPageDots();
     gfx->pushSprite(0, 0);
     return;
@@ -741,6 +911,7 @@ void setup() {
   delay(60);
   Wire.begin(TP_SDA, TP_SCL);
 
+  for (auto& h : history) for (auto& v : h.wh) v = NAN;   // unknown until fetched
   prefs.begin("task", false);
   loadTasks();
 
