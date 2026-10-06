@@ -15,16 +15,16 @@
 #include <Arduino_GFX_Library.h>
 #include <vector>
 
-// ---------------- your settings ----------------
-const char* WIFI_SSID = "your-ssid";
-const char* WIFI_PASS = "your-password";
+// Wi-Fi credentials and plug list live in secrets.h (git-ignored)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Copy secrets.example.h to secrets.h and fill in your Wi-Fi and plug IPs"
+#endif
 
+// ---------------- your settings ----------------
 struct PlugCfg { const char* name; const char* ip; };
-const PlugCfg PLUGS[] = {
-  {"Desk",   "192.168.1.50"},
-  {"Fridge", "192.168.1.51"},
-  // add more (up to ~10 fit the status dots)
-};
+const PlugCfg PLUGS[] = { PLUGS_INIT };   // up to ~10 fit the status dots
 const size_t N_PLUGS = sizeof(PLUGS) / sizeof(PLUGS[0]);
 
 const float    MAX_W        = 3000;   // full-scale of the gauge (e.g. your circuit limit)
@@ -59,6 +59,8 @@ const uint16_t COL_RED   = rgb(240, 70, 60);
 struct Reading { float w = 0, v = 0, a = 0, kwh = 0; bool online = false; bool seen = false; };
 Reading readings[N_PLUGS];
 portMUX_TYPE readMux = portMUX_INITIALIZER_UNLOCKED;
+// Explicit prototype: stops the Arduino preprocessor emitting one above struct Reading
+bool readPlug(const char* ip, Reading& r);
 
 // ---------- Kasa local protocol (TCP 9999, XOR autokey 171) ----------
 static void kasaEncrypt(const uint8_t* in, uint8_t* out, size_t n) {
@@ -230,7 +232,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(LCD_BL, OUTPUT);
   digitalWrite(LCD_BL, HIGH);
-  gfx->begin();
+  if (!gfx->begin()) Serial.println("gfx->begin() failed (panel init or 115 KB framebuffer alloc)");
   gfx->fillScreen(COL_BG);
   gfx->flush();
 

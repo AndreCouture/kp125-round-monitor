@@ -20,10 +20,14 @@
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 #endif
 
-// ---------- your settings ----------
-const char* WIFI_SSID = "your-ssid";
-const char* WIFI_PASS = "your-password";
+// Wi-Fi credentials and plug list live in secrets.h (git-ignored)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Copy secrets.example.h to secrets.h and fill in your Wi-Fi and plug IPs"
+#endif
 
+// ---------- your settings ----------
 struct Plug {
   const char* name;   // label for display
   const char* ip;     // give each plug a DHCP reservation
@@ -31,11 +35,7 @@ struct Plug {
   bool online = false;
 };
 
-Plug plugs[] = {
-  {"Desk",   "192.168.1.50"},
-  {"Fridge", "192.168.1.51"},
-  // add more...
-};
+Plug plugs[] = { PLUGS_INIT };
 const size_t N_PLUGS = sizeof(plugs) / sizeof(plugs[0]);
 
 const uint32_t POLL_MS = 5000;   // 2-10 s is plenty
