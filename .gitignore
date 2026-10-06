@@ -1,0 +1,4 @@
+secrets.h
+out/
+*.stl
+build/
