@@ -25,9 +25,9 @@ docs/photos/board.jpeg          photo of the board back
 | Piece | State |
 |---|---|
 | `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + TPAP + discovery; reads the owner's KP125M plugs. |
-| `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH; `DEMO_MODE` for layout checks. |
+| `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH/7 DAYS/CLOCK, cost estimate, night dimming, battery readout; `DEMO_MODE` for layout checks. |
 | TPAP transport | Ported to the ESP32 (`tpap.h`, see `docs/tpap-design.md`); self-test (known-answer + rejection paths) passes, reads both plugs live ("Bambu" .140, "Workbench" .252); back-off on failed logins. Reviewed by the local LLM gateway 2026-10-06 (see the design doc). |
-| `display_stand.scad` | Renders clean (OpenSCAD 2026.06, Manifold). Board numbers from Waveshare's drawing/DXF for the touch board; straight USB-C plug assumed 30 mm rigid (measure). **Not yet test-printed** — print `fit_test` first. |
+| `display_stand.scad` | Renders clean (OpenSCAD 2026.06, Manifold). Pocket follows the board's real outline (round lens + 45° PCB edges to the USB-C socket, from Waveshare's DXF); `clr` 0.4 chosen with `fit_test_set` on the owner's printer. Straight USB-C plug assumed 30 mm rigid (measure). Full stand not yet printed. |
 
 ## Tasks, in order
 1. **Toolchain.** Prefer `arduino-cli` (or PlatformIO if the owner prefers). Install core `esp32:esp32` (3.x is fine; Waveshare's own demos pin 2.0.12 only because of TFT_eSPI — we don't use it). Libraries: `GFX Library for Arduino`, `ArduinoJson`. FQBN: `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled` (verify option names with `arduino-cli board details`).

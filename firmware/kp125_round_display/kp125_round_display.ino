@@ -8,8 +8,10 @@
 //           reset the shown one. Each counts energy, time, avg and max, and survives reboots.
 //   TODAY - kWh, peak/low power;  MONTH - kWh, per plug
 //   7 DAYS - daily kWh bars from the plugs' own history (swipe up/down: all plugs / each plug)
+//   CLOCK - 24-hour time, date and total power (one swipe left from the gauge; no timeout)
 // TODAY, MONTH and 7 DAYS return to the gauge after PAGE_TIMEOUT_MS without a touch.
 // The backlight dims to NIGHT_BRIGHTNESS between NIGHT_FROM_H and NIGHT_TO_H; a touch wakes it.
+// With a Li-ion connected, the gauge page shows its voltage and an approximate charge icon.
 //
 // Libraries (Arduino Library Manager):
 //   - LovyanGFX (by lovyan03)
@@ -537,7 +539,7 @@ bool touchRead(int16_t& x, int16_t& y) {
 
 // ---------- UI ----------
 const float ARC_START = 135, ARC_SWEEP = 270;   // gauge opens at the bottom
-enum Page { PAGE_GAUGE, PAGE_TASK, PAGE_TODAY, PAGE_MONTH, PAGE_HISTORY, N_PAGES };
+enum Page { PAGE_GAUGE, PAGE_TASK, PAGE_TODAY, PAGE_MONTH, PAGE_HISTORY, PAGE_CLOCK, N_PAGES };
 int page = PAGE_GAUGE;
 uint32_t lastTouch = 0;
 const uint32_t HOLD_MS = 1200;                  // press-and-hold on TASK resets the task meter
@@ -659,6 +661,54 @@ bool costText(double kwh, char* buf, size_t n, bool compact = false) {
   return true;
 }
 
+// ---------- battery (optional 1-cell Li-ion on the MX1.25 connector) ----------
+// VBAT -> 200k -> GPIO1 -> 100k -> GND, so VBAT = 3 x ADC. With no battery the charger output reads
+// ~4.8 V on this board, above any Li-ion (the charger stops at 4.2 V): a battery is "present" from
+// 2.5 to 4.35 V and absent above 4.45 V, keeping the last state in between (hysteresis).
+#define BAT_ADC_PIN 1
+float batV = NAN;              // smoothed battery voltage
+bool batPresent = false;
+
+void updateBattery() {
+  static uint32_t last = 0;
+  if (last && millis() - last < 2000) return;
+  last = millis();
+#ifdef BAT_FAKE_MV                 // layout testing without a battery: -DBAT_FAKE_MV=3900
+  float v = BAT_FAKE_MV / 1000.0f;
+#else
+  uint32_t sum = 0;
+  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(BAT_ADC_PIN);
+  float v = sum / 16.0f * 3 / 1000.0f;
+#endif
+  batV = isnan(batV) ? v : batV + (v - batV) * 0.3f;
+  if (batV >= 2.5f && batV <= 4.35f) batPresent = true;
+  else if (batV > 4.45f || batV < 2.5f) batPresent = false;
+}
+
+// Rough state of charge from a typical Li-ion resting-voltage curve (reads high while charging)
+int batPercent(float v) {
+  static const float V[] = {3.27f, 3.61f, 3.69f, 3.73f, 3.77f, 3.80f, 3.84f, 3.87f, 3.95f, 4.02f, 4.11f, 4.20f};
+  static const int   P[] = {0,     5,     10,    20,    30,    40,    50,    60,    70,    80,    90,    100};
+  if (v <= V[0]) return 0;
+  for (int i = 1; i < 12; i++)
+    if (v <= V[i]) return P[i - 1] + (int)((v - V[i - 1]) / (V[i] - V[i - 1]) * (P[i] - P[i - 1]));
+  return 100;
+}
+
+// Battery icon + voltage, centred near the top of the gauge page; nothing when no battery is found
+void drawBattery() {
+  if (!batPresent || isnan(batV)) return;
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%.2f V", batV);
+  int pct = batPercent(batV), tw = textWidth(buf, F_SMALL), w = 20 + 5 + tw, x = 120 - w / 2;
+  uint16_t col = pct < 20 ? COL_RED : COL_GREEN;
+  gfx->drawRoundRect(x, 31, 18, 10, 2, COL_DIM);                    // body
+  gfx->fillRect(x + 18, 34, 2, 4, COL_DIM);                         // terminal nub
+  int fill = (14 * pct + 50) / 100;
+  if (fill > 0) gfx->fillRect(x + 2, 33, fill, 6, col);
+  textAt(buf, x + 25, 40, F_SMALL, COL_DIM, textdatum_t::baseline_left);
+}
+
 void drawToday() {
   char buf[32], t[8];
   textCentered("TODAY", 58, F_TITLE, COL_DIM);
@@ -733,6 +783,27 @@ void drawTask() {
 }
 
 // Last 7 days as bars, for all plugs or one (swipe up/down). Today's bar uses the live today_energy.
+// Desk clock: 24-hour time, full date, and the current total power
+void drawClock(float total) {
+  static const char* DAYS[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+  static const char* MONTHS[] = {"January", "February", "March", "April", "May", "June", "July",
+                                 "August", "September", "October", "November", "December"};
+  char buf[40];
+  if (!tpap::clockReady()) {
+    textCentered("--:--", 122, F_BIG, COL_DIM);
+    return;
+  }
+  time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  snprintf(buf, sizeof(buf), "%02d:%02d", lt.tm_hour, lt.tm_min);
+  textCentered(buf, 122, F_BIG, COL_TEXT);
+  snprintf(buf, sizeof(buf), "%s %d %s", DAYS[lt.tm_wday], lt.tm_mday, MONTHS[lt.tm_mon]);
+  textCentered(buf, 150, F_TEXT, COL_DIM);
+  snprintf(buf, sizeof(buf), "%.0f W", total);
+  textCentered(buf, 182, F_LINE, loadColor(total / MAX_W));
+}
+
 void drawHistory() {
   const uint16_t COL_BAR = rgb(80, 140, 220), COL_BAR_TODAY = rgb(150, 200, 255);
   char buf[40], cost[20];
@@ -824,8 +895,9 @@ void drawUI() {
   memcpy(histSnap, history, sizeof(histSnap));
   portEXIT_CRITICAL(&readMux);
 
-  // TASK stays up (it's watched during a task); the other pages fall back to the gauge
-  if (page != PAGE_GAUGE && page != PAGE_TASK && millis() - lastTouch > PAGE_TIMEOUT_MS) page = PAGE_GAUGE;
+  // TASK and CLOCK stay up (watched for a while); the other pages fall back to the gauge
+  if (page != PAGE_GAUGE && page != PAGE_TASK && page != PAGE_CLOCK && millis() - lastTouch > PAGE_TIMEOUT_MS)
+    page = PAGE_GAUGE;
 
   float total = 0; int online = 0;
   for (size_t i = 0; i < N_PLUGS; i++) if (snap[i].online) { total += snap[i].w; online++; }
@@ -840,7 +912,8 @@ void drawUI() {
     if (page == PAGE_TASK) drawTask();
     else if (page == PAGE_TODAY) drawToday();
     else if (page == PAGE_MONTH) drawMonth();
-    else drawHistory();
+    else if (page == PAGE_HISTORY) drawHistory();
+    else drawClock(total);
     drawPageDots();
     gfx->pushSprite(0, 0);
     return;
@@ -857,6 +930,7 @@ void drawUI() {
     return;
   }
 
+  drawBattery();
   textCentered("TOTAL", 64, F_TITLE, COL_DIM);
   snprintf(buf, sizeof(buf), "%.0f", shownW);
   valueUnit(buf, F_BIG, COL_TEXT, "W", 120);    // 46 px digits
@@ -910,6 +984,7 @@ void setup() {
   digitalWrite(TP_RST, HIGH);
   delay(60);
   Wire.begin(TP_SDA, TP_SCL);
+  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);   // battery sense, 0..~3.1 V at the pin
 
   for (auto& h : history) for (auto& v : h.wh) v = NAN;   // unknown until fetched
   prefs.begin("task", false);
@@ -921,6 +996,7 @@ void setup() {
 
 void loop() {
   handleTouch();
+  updateBattery();
   drawUI();
   delay(33);   // ~30 fps
 }

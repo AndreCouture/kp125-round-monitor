@@ -98,19 +98,23 @@ They are at the top of `firmware/kp125_round_display/kp125_round_display.ino`; c
 | **TODAY** | Today's kWh and cost, plus the day's peak and lowest total power with their times. |
 | **MONTH** | This month's kWh and cost, total and per plug. |
 | **7 DAYS** | Daily kWh bars for the last 7 days from the plugs' own history, with the 7-day total and cost (swipe up/down for all plugs or one plug). |
+| **CLOCK** | 24-hour time, the date and the current total power. One swipe left from the gauge; it stays up (no timeout). |
 
 At night the screen dims; the first touch only wakes it. It stays bright if total power is above `MAX_W`.
 
+**Battery:** if a 1-cell Li-ion is plugged into the board's MX1.25 connector, the gauge page shows its voltage and an approximate charge icon at the top. Without a battery nothing is shown (the board reads about 4.8 V there, which no Li-ion reaches). The charge level is a rough estimate from the voltage and reads high while charging.
+
 ## 9. Print the stand
 
-- File: `stand/display_stand.scad` (OpenSCAD). Parts: `stand`, `cap`, `fit_test`, e.g.
+- File: `stand/display_stand.scad` (OpenSCAD). Parts: `stand`, `cap`, `fit_test`, `fit_test_set`, e.g.
   ```
   openscad -o stand.stl -D 'PART="stand"' stand/display_stand.scad
   ```
-- Print **`fit_test`** first (a small ring) to check how the board fits.
+- Print **`fit_test_set`** first: three thin rings with 0.4, 0.5 and 0.6 mm clearance, marked with 1, 2 and 3 notches. Put the board in each, lens down, connector toward the pointed end, and set `clr` to the clearance that fits best (0.4 on the author's printer). Use the same printer and nozzle for the test and the stand.
 - The stand prints **front face down** with no supports except a short bridge over the cable tunnel; the cap prints flat.
 - The board sits in the ring from the back and the cap presses in behind it. The USB-C cable goes down a channel under the display and leaves through a side tunnel.
-- Board dimensions come from Waveshare's drawing. `plug_straight` (default 30 mm, the rigid length of a straight USB-C plug) sets the pedestal height: measure yours.
+- The board is not round at the bottom: below the lens the PCB narrows along 45° edges to a flat bottom around the USB-C socket. The pocket follows that outline (`pcb_corners`, from Waveshare's drawing) plus `clr`.
+- `plug_straight` (default 30 mm, the rigid length of a straight USB-C plug) sets the pedestal height: measure yours.
 
 ## 10. Troubleshooting
 

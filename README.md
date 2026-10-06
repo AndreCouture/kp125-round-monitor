@@ -8,7 +8,7 @@ A round touch display on your desk that shows live electricity use from TP-Link 
 - Per-plug power, voltage and current.
 - Task meters (all plugs or one plug): press and hold to start; energy, cost, time, average and max; they survive reboots.
 - Today, this month and a 7-day history, with an estimated cost from your electricity rate.
-- Night dimming with touch to wake.
+- A 24-hour desk clock page, night dimming with touch to wake, and a battery voltage readout when a Li-ion is connected.
 - Talks to the plugs locally, no cloud: Kasa KP125M over TPAP (TP-Link's newer encrypted protocol, with a device certificate check), plus legacy Kasa and KLAP.
 
 ## Parts
