@@ -3,8 +3,10 @@
 // Screen: arc gauge of total power vs MAX_W, big total in the middle,
 // "W left" headroom, then each plug cycles through with its own reading.
 // Dots at the bottom show which plugs are online.
-// Tap (or swipe) for more pages: TODAY (kWh, peak/low power) and MONTH (kWh, per plug);
-// it returns to the gauge after PAGE_TIMEOUT_MS without a touch.
+// Tap or swipe right for the next page, swipe left for the previous one:
+//   TASK  - energy since you last held the screen for HOLD_MS (task meter, survives reboots)
+//   TODAY - kWh, peak/low power;  MONTH - kWh, per plug
+// TODAY and MONTH return to the gauge after PAGE_TIMEOUT_MS without a touch.
 //
 // Libraries (Arduino Library Manager):
 //   - GFX Library for Arduino  (by moononournation, "Arduino_GFX")
@@ -14,6 +16,7 @@
 
 #include <WiFi.h>
 #include <Wire.h>
+#include <Preferences.h>
 #include <time.h>
 #include <ArduinoJson.h>
 #include <Arduino_GFX_Library.h>
@@ -77,7 +80,8 @@ const uint16_t COL_RED   = rgb(240, 70, 60);
 
 // ---------- shared readings (written by poll task, read by UI) ----------
 struct Reading {
-  float w = 0, v = 0, a = 0, kwh = 0;
+  float w = 0, v = 0, a = 0;
+  double kwh = 0;                         // plug's cumulative counter (see KasaEnergy)
   float todayKwh = NAN, monthKwh = NAN;   // plug's own counters, refreshed every USAGE_MS
   bool online = false, seen = false;
 };
@@ -91,7 +95,20 @@ struct DayStats {
   int yday = -1;   // local day of year these belong to
 };
 DayStats dayStats;
-portMUX_TYPE readMux = portMUX_INITIALIZER_UNLOCKED;   // guards readings[] and dayStats
+
+// Task meter: energy since the last reset, from the plugs' own counters (each plug's increase
+// since the previous reading, so a missed poll loses nothing). Saved to flash so a reboot
+// mid-task keeps counting.
+struct Task {
+  bool running = false;
+  time_t start = 0;
+  double kwh = 0;                 // accumulated since start
+  double last[N_PLUGS];           // each plug's counter at its last reading
+  bool haveLast[N_PLUGS];
+};
+Task task;
+bool taskDirty = false;           // UI changed it; poll task saves it
+portMUX_TYPE readMux = portMUX_INITIALIZER_UNLOCKED;   // guards readings[], dayStats, task
 KasaConn conns[N_PLUGS];   // protocol + session per plug; poll task only
 // Explicit prototype: stops the Arduino preprocessor emitting one above struct Reading
 bool readPlug(const char* ip, KasaConn& conn, Reading& r, String& err);
@@ -127,8 +144,68 @@ void updateDayStats(float total) {
   portEXIT_CRITICAL(&readMux);
 }
 
+// ---------- task meter persistence (NVS namespace "task") ----------
+Preferences prefs;
+
+// Saves a copy taken under the lock; called from the poll task only
+void saveTask() {
+  Task t;
+  portENTER_CRITICAL(&readMux);
+  t = task;
+  taskDirty = false;
+  portEXIT_CRITICAL(&readMux);
+  prefs.putBool("run", t.running);
+  prefs.putLong64("start", (int64_t)t.start);
+  prefs.putDouble("kwh", t.kwh);
+  prefs.putBytes("last", t.last, sizeof(t.last));
+  prefs.putBytes("have", t.haveLast, sizeof(t.haveLast));
+  prefs.putUInt("n", N_PLUGS);
+}
+
+void loadTask() {
+  task = Task();
+  for (size_t i = 0; i < N_PLUGS; i++) task.haveLast[i] = false;
+  if (prefs.getUInt("n", 0) != N_PLUGS) return;   // plug list changed: start fresh
+  task.running = prefs.getBool("run", false);
+  task.start = (time_t)prefs.getLong64("start", 0);
+  task.kwh = prefs.getDouble("kwh", 0);
+  if (prefs.getBytes("last", task.last, sizeof(task.last)) != sizeof(task.last) ||
+      prefs.getBytes("have", task.haveLast, sizeof(task.haveLast)) != sizeof(task.haveLast))
+    for (size_t i = 0; i < N_PLUGS; i++) task.haveLast[i] = false;
+}
+
+// Reset to 0 and start counting from each plug's current counter (UI core)
+void resetTask() {
+  portENTER_CRITICAL(&readMux);
+  task.running = true;
+  task.start = time(nullptr);
+  task.kwh = 0;
+  for (size_t i = 0; i < N_PLUGS; i++) {
+    task.haveLast[i] = readings[i].seen && readings[i].online;
+    task.last[i] = readings[i].kwh;
+  }
+  taskDirty = true;
+  portEXIT_CRITICAL(&readMux);
+}
+
+// Add one plug's counter increase to the running task. A counter that went down was reset
+// (KP125M: 1st of the month), so the whole new value counts.
+void accumulateTask(size_t i, double counterKwh) {
+  portENTER_CRITICAL(&readMux);
+  if (task.running) {
+    if (task.haveLast[i]) {
+      double d = counterKwh - task.last[i];
+      task.kwh += d >= 0 ? d : counterKwh;
+    }
+    task.last[i] = counterKwh;
+    task.haveLast[i] = true;
+  }
+  portEXIT_CRITICAL(&readMux);
+}
+
 // Runs on core 0 so slow/offline plugs never freeze the display
 void pollTask(void*) {
+  uint32_t lastSave = millis();
   uint32_t lastUsage = 0;
   bool usageDue = true;
   for (;;) {
@@ -144,7 +221,9 @@ void pollTask(void*) {
       float t = millis() / 1000.0f;
       r.online = (i + 1 < N_PLUGS) || N_PLUGS == 1;
       r.w = max(0.0f, MAX_W / N_PLUGS * (0.5f + 0.5f * sinf(t / 8 + i)));
-      r.v = 120; r.a = r.w / 120; r.kwh = 12.3f;
+      static double demoKwh[N_PLUGS];
+      demoKwh[i] += r.w * POLL_MS / 3.6e9;   // integrate the fake power into a fake counter
+      r.v = 120; r.a = r.w / 120; r.kwh = demoKwh[i];
       r.todayKwh = 1.23f * (i + 1); r.monthKwh = 34.5f * (i + 1);
 #else
       r.online = (WiFi.status() == WL_CONNECTED) && readPlug(PLUGS[i].ip, conns[i], r, err);
@@ -164,10 +243,18 @@ void pollTask(void*) {
       portEXIT_CRITICAL(&readMux);
       if (r.online) Serial.printf("%-8s ok  %.1f W\n", PLUGS[i].name, r.w);
       else          Serial.printf("%-8s --  %s\n", PLUGS[i].name, err.c_str());
+      if (r.online) accumulateTask(i, r.kwh);
       total += r.online ? r.w : 0;
       allOnline &= r.online;
     }
     if (allOnline) updateDayStats(total);
+    // Save the task after a reset, and every 5 min while it runs (limits flash wear)
+    bool running;
+    portENTER_CRITICAL(&readMux);
+    bool dirty = taskDirty;
+    running = task.running;
+    portEXIT_CRITICAL(&readMux);
+    if (dirty || (running && millis() - lastSave > 300000)) { saveTask(); lastSave = millis(); }
     if (usageDue) lastUsage = millis();
     vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     usageDue = millis() - lastUsage >= USAGE_MS;
@@ -225,30 +312,43 @@ bool touchRead(int16_t& x, int16_t& y) {
 
 // ---------- UI ----------
 const float ARC_START = 135, ARC_SWEEP = 270;   // gauge opens at the bottom
-enum Page { PAGE_GAUGE, PAGE_TODAY, PAGE_MONTH, N_PAGES };
+enum Page { PAGE_GAUGE, PAGE_TASK, PAGE_TODAY, PAGE_MONTH, N_PAGES };
 int page = PAGE_GAUGE;
 uint32_t lastTouch = 0;
+const uint32_t HOLD_MS = 1200;                  // press-and-hold on TASK resets the task meter
+float holdProgress = 0;                         // 0..1 while holding on TASK, for the ring
+uint32_t taskResetAt = 0;                       // when the last reset fired (brief "started" flash)
+Task taskSnap;
 float shownW = 0;                               // animated value
 size_t cycleIdx = 0;
 uint32_t lastCycle = 0;
 Reading snap[N_PLUGS];                          // UI-side copies, refreshed every frame
 DayStats statsSnap;
 
-// Tap = next page; swipe left/right = next/previous
+// Tap or swipe right = next page; swipe left = previous; hold on TASK = reset the task meter
 void handleTouch() {
-  static bool down = false;
+  static bool down = false, held = false;
   static int16_t x0, y0, xl, yl;
   static uint32_t t0;
   int16_t x, y;
+  holdProgress = 0;
   if (touchRead(x, y)) {
-    if (!down) { down = true; x0 = x; y0 = y; t0 = millis(); }
+    if (!down) { down = true; held = false; x0 = x; y0 = y; t0 = millis(); }
     xl = x; yl = y;
+    bool still = abs(xl - x0) < 25 && abs(yl - y0) < 25;
+    if (page == PAGE_TASK && still && !held) {
+      uint32_t ms = millis() - t0;
+      holdProgress = min(1.0f, ms / (float)HOLD_MS);
+      if (ms >= HOLD_MS && tpap::clockReady()) { resetTask(); held = true; taskResetAt = millis(); }
+    }
+    lastTouch = millis();
     return;
   }
   if (!down) return;
   down = false;                                  // finger lifted: classify the gesture
+  if (held) return;                              // that was a hold, not a tap
   int dx = xl - x0, dy = yl - y0;
-  if (abs(dx) > 50 && abs(dx) > abs(dy)) page = (page + (dx < 0 ? 1 : N_PAGES - 1)) % N_PAGES;
+  if (abs(dx) > 50 && abs(dx) > abs(dy)) page = (page + (dx > 0 ? 1 : N_PAGES - 1)) % N_PAGES;
   else if (abs(dx) < 25 && abs(dy) < 25 && millis() - t0 < 800) page = (page + 1) % N_PAGES;
   else return;
   lastTouch = millis();
@@ -308,6 +408,39 @@ void drawToday() {
   }
 }
 
+void drawTask() {
+  char buf[32];
+  const Task& t = taskSnap;
+  textCentered("TASK", 44, 2, COL_DIM);
+  // ring fills while holding; full ring right after a reset
+  bool flash = taskResetAt && millis() - taskResetAt < 1000;
+  if (holdProgress > 0.02f || flash)
+    drawArc(120, 120, 108, 116, -90, -90 + 360 * (flash ? 1.0f : holdProgress), flash ? COL_GREEN : COL_AMBER);
+  if (!t.running) {
+    textCentered("--", 76, 5, COL_DIM);
+    textCentered(tpap::clockReady() ? "hold to start" : "waiting for clock", 140, 2, COL_DIM);
+    return;
+  }
+  double wh = t.kwh * 1000;
+  if (wh < 10)        snprintf(buf, sizeof(buf), "%.1f", wh);
+  else if (wh < 1000) snprintf(buf, sizeof(buf), "%.0f", wh);
+  else                snprintf(buf, sizeof(buf), "%.2f", t.kwh);
+  textCentered(buf, 72, 5, COL_TEXT);
+  textCentered(wh < 1000 ? "Wh" : "kWh", 116, 2, COL_DIM);
+
+  long secs = tpap::clockReady() ? (long)(time(nullptr) - t.start) : 0;
+  if (secs < 0) secs = 0;
+  if (secs < 3600) snprintf(buf, sizeof(buf), "%ldm %02lds", secs / 60, secs % 60);
+  else             snprintf(buf, sizeof(buf), "%ldh %02ldm", secs / 3600, (secs / 60) % 60);
+  textCentered(buf, 142, 2, COL_TEXT);
+  if (secs >= 10) {
+    float avg = wh * 3600.0 / secs;
+    snprintf(buf, sizeof(buf), "avg %.0f W", avg);
+    textCentered(buf, 164, 2, loadColor(avg / MAX_W));
+  }
+  textCentered(flash ? "started" : "hold to reset", 192, 1, flash ? COL_GREEN : COL_DIM);
+}
+
 void drawMonth() {
   static const char* MONTHS[] = {"JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY",
                                  "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"};
@@ -334,9 +467,11 @@ void drawUI() {
   portENTER_CRITICAL(&readMux);
   memcpy(snap, readings, sizeof(snap));
   statsSnap = dayStats;
+  taskSnap = task;
   portEXIT_CRITICAL(&readMux);
 
-  if (page != PAGE_GAUGE && millis() - lastTouch > PAGE_TIMEOUT_MS) page = PAGE_GAUGE;
+  // TASK stays up (it's watched during a task); the other pages fall back to the gauge
+  if (page != PAGE_GAUGE && page != PAGE_TASK && millis() - lastTouch > PAGE_TIMEOUT_MS) page = PAGE_GAUGE;
 
   float total = 0; int online = 0;
   for (size_t i = 0; i < N_PLUGS; i++) if (snap[i].online) { total += snap[i].w; online++; }
@@ -346,8 +481,8 @@ void drawUI() {
   uint16_t col = loadColor(frac);
 
   gfx->fillScreen(COL_BG);
-  if (page == PAGE_TODAY || page == PAGE_MONTH) {
-    if (page == PAGE_TODAY) drawToday(); else drawMonth();
+  if (page != PAGE_GAUGE) {
+    if (page == PAGE_TASK) drawTask(); else if (page == PAGE_TODAY) drawToday(); else drawMonth();
     drawPageDots();
     gfx->flush();
     return;
@@ -408,6 +543,9 @@ void setup() {
   digitalWrite(TP_RST, HIGH);
   delay(60);
   Wire.begin(TP_SDA, TP_SCL);
+
+  prefs.begin("task", false);
+  loadTask();
 
   // 16 KB: TPAP's elliptic-curve and certificate code needs more than 8 KB
   xTaskCreatePinnedToCore(pollTask, "poll", 16384, nullptr, 1, nullptr, 0);

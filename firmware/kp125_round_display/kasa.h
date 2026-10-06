@@ -232,7 +232,9 @@ struct KasaConn {
   tpap::Session tpap;
 };
 
-struct KasaEnergy { float w = 0, v = 0, a = 0, kwh = 0; };
+// kwh is the plug's cumulative counter. KP125M: energy_mwh (1 mWh resolution), which is the
+// month-to-date figure, so it drops back to 0 on the 1st. Legacy IOT plugs: total_wh.
+struct KasaEnergy { float w = 0, v = 0, a = 0; double kwh = 0; };
 
 static const char* IOT_ENERGY_CMD = "{\"emeter\":{\"get_realtime\":{}}}";
 static const char* SMART_ENERGY_CMD = "{\"method\":\"get_emeter_data\"}";
@@ -261,8 +263,10 @@ static bool parseEnergy(const String& reply, bool smart, KasaEnergy& e, String& 
   e.w   = rt["power_mw"].is<float>()   ? rt["power_mw"].as<float>() / 1000.0f   : rt["power"].as<float>();
   e.v   = rt["voltage_mv"].is<float>() ? rt["voltage_mv"].as<float>() / 1000.0f : rt["voltage"].as<float>();
   e.a   = rt["current_ma"].is<float>() ? rt["current_ma"].as<float>() / 1000.0f : rt["current"].as<float>();
-  float wh = rt["total_wh"].is<float>() ? rt["total_wh"].as<float>() : rt["energy_wh"].as<float>();
-  e.kwh = wh ? wh / 1000.0f : rt["total"].as<float>();
+  if (rt["energy_mwh"].is<double>())    e.kwh = rt["energy_mwh"].as<double>() / 1e6;
+  else if (rt["total_wh"].is<double>()) e.kwh = rt["total_wh"].as<double>() / 1e3;
+  else if (rt["energy_wh"].is<double>()) e.kwh = rt["energy_wh"].as<double>() / 1e3;
+  else                                  e.kwh = rt["total"].as<double>();
   return true;
 }
 
