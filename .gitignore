@@ -2,3 +2,4 @@ secrets.h
 out/
 *.stl
 build/
+.DS_Store

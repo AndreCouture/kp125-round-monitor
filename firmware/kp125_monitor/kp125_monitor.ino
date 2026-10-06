@@ -1,5 +1,8 @@
 // ESP32 energy monitor for TP-Link Kasa KP125 smart plugs
-// Polls each plug locally (TCP 9999) and prints power, voltage, current, total kWh.
+// Polls each plug locally (legacy TCP 9999 or KLAP over HTTP, see kasa.h) and prints
+// power, voltage, current, total kWh.
+// At boot it also broadcasts a Kasa discovery and prints every plug that answers,
+// ready to paste into secrets.h. Leave PLUGS_INIT undefined for discovery-only mode.
 // Optional: shows live watts on a 128x64 SSD1306 OLED (set USE_OLED 1).
 //
 // Libraries (Arduino Library Manager):
@@ -8,6 +11,7 @@
 // Board: any ESP32 (Arduino-ESP32 core 2.x or 3.x)
 
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include <vector>
 
@@ -26,6 +30,7 @@ Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 #else
 #error "Copy secrets.example.h to secrets.h and fill in your Wi-Fi and plug IPs"
 #endif
+#include "kasa.h"   // after secrets.h: uses KASA_USER / KASA_PASS
 
 // ---------- your settings ----------
 struct Plug {
@@ -33,59 +38,30 @@ struct Plug {
   const char* ip;     // give each plug a DHCP reservation
   float power_w = NAN, voltage_v = NAN, current_a = NAN, total_kwh = NAN;
   bool online = false;
+  KasaConn conn;      // protocol (legacy/KLAP) and KLAP session, found on first contact
 };
 
+#ifdef PLUGS_INIT
 Plug plugs[] = { PLUGS_INIT };
 const size_t N_PLUGS = sizeof(plugs) / sizeof(plugs[0]);
+#else
+Plug plugs[1];                   // discovery-only mode: nothing to poll
+const size_t N_PLUGS = 0;
+#endif
 
 const uint32_t POLL_MS = 5000;   // 2-10 s is plenty
 // -----------------------------------
 
-// Kasa "autokey" XOR obfuscation, initial key 171
-static void kasaEncrypt(const uint8_t* in, uint8_t* out, size_t n) {
-  uint8_t key = 171;
-  for (size_t i = 0; i < n; i++) { out[i] = key ^ in[i]; key = out[i]; }
-}
-static void kasaDecrypt(uint8_t* buf, size_t n) {
-  uint8_t key = 171;
-  for (size_t i = 0; i < n; i++) { uint8_t c = buf[i]; buf[i] = key ^ c; key = c; }
-}
-
-// Send one JSON command, return decrypted JSON reply
-bool kasaQuery(const char* ip, const char* cmd, String& reply) {
-  WiFiClient c;
-  c.setTimeout(3000);
-  if (!c.connect(ip, 9999, 3000)) return false;
-
-  size_t n = strlen(cmd);
-  std::vector<uint8_t> out(4 + n);
-  out[0] = n >> 24; out[1] = n >> 16; out[2] = n >> 8; out[3] = n;
-  kasaEncrypt((const uint8_t*)cmd, out.data() + 4, n);
-  c.write(out.data(), out.size());
-
-  uint8_t hdr[4];
-  if (c.readBytes(hdr, 4) != 4) return false;
-  uint32_t len = ((uint32_t)hdr[0] << 24) | ((uint32_t)hdr[1] << 16) |
-                 ((uint32_t)hdr[2] << 8) | hdr[3];
-  if (len == 0 || len > 8192) return false;
-
-  std::vector<uint8_t> in(len + 1);
-  if (c.readBytes(in.data(), len) != len) return false;
-  c.stop();
-  kasaDecrypt(in.data(), len);
-  in[len] = 0;
-  reply = String((const char*)in.data());
-  return true;
-}
+String lastErr;   // why the last readPlug() failed, for the serial log
 
 bool readPlug(Plug& p) {
   String reply;
-  if (!kasaQuery(p.ip, "{\"emeter\":{\"get_realtime\":{}}}", reply)) return false;
+  if (!kasaRequest(p.ip, p.conn, "{\"emeter\":{\"get_realtime\":{}}}", reply, lastErr)) return false;
 
   JsonDocument doc;
-  if (deserializeJson(doc, reply)) return false;
+  if (deserializeJson(doc, reply)) { lastErr = "reply is not JSON"; return false; }
   JsonObject rt = doc["emeter"]["get_realtime"];
-  if (rt.isNull() || rt["err_code"].as<int>() != 0) return false;
+  if (rt.isNull() || rt["err_code"].as<int>() != 0) { lastErr = "no emeter data: " + reply.substring(0, 120); return false; }
 
   // KP125 reports milli-units; older HS110 uses plain units, handled as fallback
   p.power_w   = rt["power_mw"].is<float>()   ? rt["power_mw"].as<float>() / 1000.0f   : rt["power"].as<float>();
@@ -93,6 +69,52 @@ bool readPlug(Plug& p) {
   p.current_a = rt["current_ma"].is<float>() ? rt["current_ma"].as<float>() / 1000.0f : rt["current"].as<float>();
   p.total_kwh = rt["total_wh"].is<float>()   ? rt["total_wh"].as<float>() / 1000.0f   : rt["total"].as<float>();
   return true;
+}
+
+// Broadcast get_sysinfo on UDP 9999 (same XOR, no length prefix) and print each
+// plug that answers. Plugs on KLAP-only firmware don't answer this.
+void discoverPlugs() {
+  const char* cmd = "{\"system\":{\"get_sysinfo\":{}}}";
+  size_t n = strlen(cmd);
+  std::vector<uint8_t> out(n);
+  kasaEncrypt((const uint8_t*)cmd, out.data(), n);
+
+  WiFiUDP udp;
+  udp.begin(9998);
+  std::vector<IPAddress> seen;
+  std::vector<uint8_t> buf(2048);
+  Serial.printf("Discovering Kasa plugs on %s ...\n", WiFi.broadcastIP().toString().c_str());
+  Serial.println("#define PLUGS_INIT \\");
+
+  for (int round = 0; round < 3; round++) {
+    udp.beginPacket(WiFi.broadcastIP(), 9999);
+    udp.write(out.data(), n);
+    udp.endPacket();
+    for (uint32_t t0 = millis(); millis() - t0 < 1000; delay(10)) {
+      int len = udp.parsePacket();
+      if (len <= 0) continue;
+      IPAddress ip = udp.remoteIP();
+      len = udp.read(buf.data(), buf.size() - 1);
+      bool dup = false;
+      for (auto& s : seen) dup |= (s == ip);
+      if (dup || len <= 0) continue;
+      seen.push_back(ip);
+
+      kasaDecrypt(buf.data(), len);
+      buf[len] = 0;
+      JsonDocument doc;
+      if (deserializeJson(doc, (const char*)buf.data())) continue;
+      JsonObject si = doc["system"]["get_sysinfo"];
+      bool emeter = strstr(si["feature"] | "", "ENE") != nullptr;
+      Serial.printf("  {\"%s\", \"%s\"}, /* %s mac %s%s */ \\\n",
+                    si["alias"] | "?", ip.toString().c_str(), si["model"] | "?",
+                    si["mac"] | "?", emeter ? "" : "  (no energy meter)");
+    }
+  }
+  udp.stop();
+  if (seen.empty())
+    Serial.println("  (none found: plugs on another network/VLAN, or KLAP-only firmware)");
+  Serial.println();
 }
 
 void connectWiFi() {
@@ -130,9 +152,17 @@ void setup() {
   oled.clearDisplay(); oled.display();
 #endif
   connectWiFi();
+  if (WiFi.status() == WL_CONNECTED) discoverPlugs();
 }
 
 void loop() {
+  if (N_PLUGS == 0) {              // discovery-only mode
+    delay(30000);
+    connectWiFi();
+    if (WiFi.status() == WL_CONNECTED) discoverPlugs();
+    return;
+  }
+
   static uint32_t last = 0;
   if (millis() - last < POLL_MS && last != 0) return;
   last = millis();
@@ -147,7 +177,7 @@ void loop() {
       Serial.printf("%-8s %7.1f W  %5.1f V  %5.3f A  %8.3f kWh\n",
                     p.name, p.power_w, p.voltage_v, p.current_a, p.total_kwh);
     } else {
-      Serial.printf("%-8s no response (%s)\n", p.name, p.ip);
+      Serial.printf("%-8s no response (%s): %s\n", p.name, p.ip, lastErr.c_str());
     }
   }
   Serial.printf("TOTAL    %7.1f W\n\n", total);

@@ -36,5 +36,14 @@ Waveshare publishes a 3D model (`ESP32-S3-LCD-1.28.zip` on the wiki) — use it 
 - Payload obfuscation: XOR autokey, key starts at 171; encrypt `key = out[i]`, decrypt `key = in[i]`.
 - `{"emeter":{"get_realtime":{}}}` → `{"emeter":{"get_realtime":{"voltage_mv":…,"current_ma":…,"power_mw":…,"total_wh":…,"err_code":0}}}`
 - `{"system":{"get_sysinfo":{}}}` gives alias, model, firmware, relay state.
-- KP125**M** (Matter) and some newer firmware use **KLAP** (HTTP POST /app/handshake1, /app/handshake2, then /app/request with AES-128-CBC). Reference implementation: python-kasa.
+- KP125**M** (Matter) and some newer firmware use **KLAP** (HTTP POST /app/handshake1, /app/handshake2, then /app/request with AES-128-CBC). Reference implementation: python-kasa. Implemented in `firmware/*/kasa.h`, but not yet verified against a real plug (see below).
+
+## What the owner's plugs actually are (probed 2026-10-05)
+Both plugs are **KP125M(US)**, firmware **1.4.1 Build 260721 Rel.06565**, `device_type` `SMART.KASAPLUG`. On this firmware:
+- TCP 9999 is refused (no legacy protocol).
+- TP-Link discovery (UDP 20002) and `POST /` with `{"method":"login","params":{"sub_method":"discover"}}` both report `encrypt_type: "TPAP"`, `tpap_preferred: true`.
+- KLAP `POST /app/handshake1` returns **HTTP 403** before any credential check; the old AES transport `POST /app` returns `error_code 1003`.
+- Turning on Kasa app → Me → Settings → **Third Party Compatibility** (including toggling it off/on, and power-cycling a plug) did **not** change `tpap_preferred`.
+
+TPAP is SPAKE2+ (P-256) based. As of 2026-10-05 python-kasa has no released TPAP transport ([PR #1592](https://github.com/python-kasa/python-kasa/pull/1592) open; context in [issue #1733](https://github.com/python-kasa/python-kasa/issues/1733)). The KLAP check that matters is `tpap_preferred: false` from the HTTP discover call: in that issue, plugs reporting `false` worked over plain KLAP (login version 2).
 - Poll no faster than every ~2 s.
