@@ -8,6 +8,7 @@
 //           reset the shown one. Each counts energy, time, avg and max, and survives reboots.
 //   TODAY - kWh, peak/low power;  MONTH - kWh, per plug
 // TODAY and MONTH return to the gauge after PAGE_TIMEOUT_MS without a touch.
+// The backlight dims to NIGHT_BRIGHTNESS between NIGHT_FROM_H and NIGHT_TO_H; a touch wakes it.
 //
 // Libraries (Arduino Library Manager):
 //   - LovyanGFX (by lovyan03)
@@ -45,6 +46,18 @@ const PlugCfg PLUGS[] = { PLUGS_INIT };   // up to ~10 fit the status dots
 const size_t N_PLUGS = sizeof(PLUGS) / sizeof(PLUGS[0]);
 
 const float    MAX_W        = 1440;   // gauge full-scale: 15 A x 120 V x 80% continuous-load limit
+// Night dimming (local time, TZ_INFO): the window may wrap midnight; equal hours = never dim.
+// A touch wakes the screen for WAKE_MS; above MAX_W it stays bright so an overload is visible.
+// (Test it any time of day by building with -DNIGHT_FROM=<hour> -DNIGHT_TO=<hour>.)
+#ifndef NIGHT_FROM
+#define NIGHT_FROM 22
+#endif
+#ifndef NIGHT_TO
+#define NIGHT_TO 7
+#endif
+const uint8_t  NIGHT_FROM_H = NIGHT_FROM, NIGHT_TO_H = NIGHT_TO;
+const uint8_t  DAY_BRIGHTNESS = 255, NIGHT_BRIGHTNESS = 12;   // backlight PWM 0..255 (0 = off)
+const uint32_t WAKE_MS      = 30000;
 // Estimated cost = kWh x RATE_PER_KWH: energy only (no delivery, fixed charges or tax). 0 hides it.
 const float    RATE_PER_KWH = 0.11142;  // flat rate in CURRENCY per kWh (11.142 cents/kWh)
 const char*    CURRENCY     = "$";
@@ -432,16 +445,50 @@ size_t cycleIdx = 0;                            // plug shown on the gauge page 
 Reading snap[N_PLUGS];                          // UI-side copies, refreshed every frame
 DayStats statsSnap;
 
+// ---------- night dimming ----------
+uint8_t brightness = DAY_BRIGHTNESS;            // current backlight level (fades toward the target)
+uint32_t lastWake = 0;
+bool woken = false;
+
+bool isNight() {
+  if (!tpap::clockReady() || NIGHT_FROM_H == NIGHT_TO_H) return false;   // clock unknown: day
+  time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  int h = lt.tm_hour;
+  return NIGHT_FROM_H < NIGHT_TO_H ? (h >= NIGHT_FROM_H && h < NIGHT_TO_H)
+                                   : (h >= NIGHT_FROM_H || h < NIGHT_TO_H);   // wraps midnight
+}
+
+void wakeScreen() { woken = true; lastWake = millis(); }
+
+// Fade toward the target, ~1 s for the full range at 30 fps; only touches the PWM when it changes
+void updateBrightness(float total) {
+  bool awake = woken && millis() - lastWake < WAKE_MS;
+  uint8_t target = (isNight() && !awake && total <= MAX_W) ? NIGHT_BRIGHTNESS : DAY_BRIGHTNESS;
+  if (brightness == target) return;
+  const int step = 8;
+  int b = brightness;
+  b = target > b ? min((int)target, b + step) : max((int)target, b - step);
+  brightness = b;
+  lcd.setBrightness(brightness);
+}
+
 // Tap or swipe right = next page; swipe left = previous; hold on TASK = reset the task meter;
 // swipe up/down on the gauge = next/previous plug, on TASK = next/previous meter
 void handleTouch() {
-  static bool down = false, held = false;
+  static bool down = false, held = false, swallow = false;
   static int16_t x0, y0, xl, yl;
   static uint32_t t0;
   int16_t x, y;
   holdProgress = 0;
   if (touchRead(x, y)) {
-    if (!down) { down = true; held = false; x0 = x; y0 = y; t0 = millis(); }
+    if (!down) {
+      down = true; held = false; x0 = x; y0 = y; t0 = millis();
+      swallow = brightness < DAY_BRIGHTNESS / 2;   // screen is dimmed: this touch only wakes it
+    }
+    wakeScreen();
+    if (swallow) return;
     xl = x; yl = y;
     bool still = abs(xl - x0) < 25 && abs(yl - y0) < 25;
     if (page == PAGE_TASK && still && !held) {
@@ -454,6 +501,7 @@ void handleTouch() {
   }
   if (!down) return;
   down = false;                                  // finger lifted: classify the gesture
+  if (swallow) { swallow = false; return; }      // that touch woke the screen
   if (held) return;                              // that was a hold, not a tap
   int dx = xl - x0, dy = yl - y0;  if (abs(dx) > 50 && abs(dx) > abs(dy)) page = (page + (dx > 0 ? 1 : N_PAGES - 1)) % N_PAGES;
   else if (abs(dy) > 50 && abs(dy) > abs(dx)) {   // finger moving up = next
@@ -615,6 +663,7 @@ void drawUI() {
   float total = 0; int online = 0;
   for (size_t i = 0; i < N_PLUGS; i++) if (snap[i].online) { total += snap[i].w; online++; }
 
+  updateBrightness(total);
   shownW += (total - shownW) * 0.15f;           // smooth needle (keeps animating on other pages)
   float frac = constrain(shownW / MAX_W, 0.0f, 1.0f);
   uint16_t col = loadColor(frac);
