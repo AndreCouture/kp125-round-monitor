@@ -1,26 +1,29 @@
-// Desk stand for the Waveshare ESP32-S3-LCD-1.28 (round 240x240 display)
+// Desk stand for the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 touch display)
 // Parts: "stand" (tilted holder + pedestal + base) and "cap" (press-fit back cover).
 // Open in OpenSCAD, set PART, F6 to render, F7 to export STL.
 // All dimensions in mm.
 //
-// STATUS: first draft, NOT yet test-printed. Board dimensions below are estimates —
-// measure your board with calipers and update the "measure these" block first.
-// Print PART="fit_test" (a 3-minute ring) before printing the full stand.
+// STATUS: renders clean (manifold), NOT yet test-printed. Board numbers come from Waveshare's
+// dimension drawing / DXF for this board (wiki: ESP32-S3-Touch-LCD-1.28.zip), not calipers.
+// Print PART="fit_test" (a few-minute ring) before printing the full stand.
 
 PART = "both";       // "stand", "cap", "fit_test", or "both" (assembled preview)
 
-// ---------- measure these on your board ----------
-board_d       = 38.6;  // outer diameter of the round display/board (widest point)
-stack_t       = 10.0;  // front glass to tallest part on the back (incl. 12-pin header)
-view_d        = 35.0;  // front window; must be > 32.4 (active area) and < board_d
-usb_out       = 4.0;   // how far the USB-C socket sticks out below the round outline
-usb_y         = 7.0;   // USB-C socket centre, measured back from the front glass
+// ---------- board (from Waveshare's drawing; check with calipers if a print doesn't fit) ----------
+board_d       = 38.51; // lens OD, the widest round part (drawing: 38.51 +/-0.05)
+stack_t       = 8.7;   // lens front to tallest back part: 8.40 (battery connector; 12-pin is 8.13) + 0.3
+view_d        = 35.0;  // front window: > 33.40 (lens view area), < 35.67 (ink edge) hides the border
+usb_out       = 2.52;  // USB-C socket below the round outline (41.04 overall - 38.51 lens)
+usb_y         = 6.67;  // USB-C socket centre behind the lens front (socket body 5.09..8.25)
 
 // ---------- your USB-C cable ----------
 plug_w        = 13.5;  // plug overmold width + clearance
 plug_t        = 8.0;   // plug overmold thickness + clearance
-plug_straight = 24.0;  // straight length from socket face to where a right-angle plug turns
-elbow_h       = 16.0;  // height of the right-angle elbow (tunnel height); ~12 is fine for straight plugs
+// Owner's cable: straight plug, pointing down. Measure its rigid length (metal + overmold +
+// stiff strain relief) and set plug_straight; 30 is a typical straight USB-C plug.
+// Right-angle plug instead: plug_straight = length to the bend, elbow_h = elbow height (~16).
+plug_straight = 30.0;  // rigid length below the socket face (sets the pedestal height)
+elbow_h       = 12.0;  // tunnel height where the cable bends to exit sideways or out the back
 
 // ---------- stand ----------
 tilt     = 15;         // lean back from vertical, degrees
@@ -69,6 +72,11 @@ module head_cuts() {
     translate([0, lip_t, cz]) rotate([-90, 0, 0]) cylinder(d=D, h=100);
     // recess so the cap plate sits flush against the ring and clears the pedestal
     translate([0, ring_d, cz]) rotate([-90, 0, 0]) cylinder(r=R_out + 0.4, h=100);
+}
+
+// Cable cuts, also in module coords. stand_world() clips them to above the base so the tilt
+// can't carry them down through the base plate (which used to split the base in two).
+module cable_cuts() {
     // USB socket + plug channel down to the tunnel, open to the back
     translate([-plug_w/2, ch_y0, tz0]) cube([plug_w, 100, cz - tz0]);
     // tunnel across the full width so a right-angle plug can turn left or right
@@ -86,6 +94,10 @@ module stand_world() {
             rotate([-tilt, 0, 0]) translate([-500, 0, -500]) cube(1000); // behind the front plane
         }
         rotate([-tilt, 0, 0]) head_cuts();
+        intersection() {                                               // cable cuts, kept above the base
+            rotate([-tilt, 0, 0]) cable_cuts();
+            translate([-500, -500, base_t]) cube(1000);
+        }
         // round off the base corners a little
         for (sx = [-1, 1]) translate([sx*base_w/2, base_d, -1])
             rotate([0, 0, sx > 0 ? 0 : 90]) translate([-6, -6, 0])
