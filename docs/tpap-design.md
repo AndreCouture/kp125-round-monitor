@@ -1,6 +1,6 @@
 # TPAP client for the ESP32 — design
 
-Status: implemented in `firmware/*/tpap.h`; known-answer self-test passes and both sketches read the "Bambu" KP125M live (2026-10-06). **Pending review** by the local LLM gateway (`architect`, `security-review`, `coder-pro`) — see "Review checklist" at the end.
+Status: implemented in `firmware/*/tpap.h`; self-test (known-answer + rejection paths) passes and both sketches read both KP125M plugs live (2026-10-06). Reviewed by the local LLM gateway on 2026-10-06 — see "Review" at the end.
 
 ## Why
 The owner's plugs are KP125M(US) on firmware 1.4.1. They refuse the legacy protocol (TCP 9999) and KLAP (HTTP 403) and only accept **TPAP**, TP-Link's SPAKE2+ based local protocol. No released library supports it; python-kasa [PR #1592](https://github.com/python-kasa/python-kasa/pull/1592) (`ZeliardM/python-kasa@feature/tpap`) does, and was verified against both plugs on 2026-10-06. That branch's `kasa/transports/tpaptransport.py` is the reference for this port.
@@ -44,7 +44,8 @@ Out of scope: TLS modes 1/2, NOC certificates, camera/robot passcode types, SHA-
 - **Device attestation (DAC).** `dac_ica` must be signed by the embedded TP-Link root CA, `dac_ca` by `dac_ica` (or directly by the root when no ICA), both inside their validity period, and `dac_proof` must be a valid ECDSA-SHA256 signature by `dac_ca` over `K ‖ dac_nonce`. Same checks as the reference.
 - **Clock.** Validity checks need real time, so the sketches start SNTP after Wi-Fi. Until the clock is set, TPAP refuses to connect ("waiting for NTP") rather than skipping the date check.
 - **Secrets in memory.** `w0`, `w1`, `x`, the PBKDF2 output, the credential string and `K` are zeroized as soon as they are no longer needed; the session key and nonce are zeroized when a session is dropped.
-- **Credentials at rest.** `KASA_USER`/`KASA_PASS` stay in the git-ignored `secrets.h`. Open question for review: store only `sha1_hex(password)` for this variant (removes the plaintext from flash, but breaks other `passwd_id`s and KLAP).
+- **Credentials at rest.** `KASA_USER`/`KASA_PASS` (and the Wi-Fi password) stay in the git-ignored `secrets.h` and are compiled into flash in plain text, so anyone holding the board can read them with esptool. Accepted for a desk gadget at home. Hardening option, not enabled: ESP32-S3 flash encryption (plus NVS encryption), which protects the image at rest but is a one-way eFuse change on the chip, so it is left to the owner. Storing only `sha1_hex(password)` was considered and rejected: it would still be a working credential for these plugs and would break KLAP and other `passwd_id`s.
+- **Back-off.** A failed handshake (wrong password, misbehaving plug, network error) is not retried every poll: each plug waits 3 s, doubling to 5 min, before the next login; a success resets it. Waiting for NTP is not counted (no request is sent). This avoids hammering the plug with logins, which TP-Link devices may answer by locking the account.
 - **Input bounds.** HTTP bodies capped at 16 KB, base64 fields length-checked, `iterations` capped, reply sequence number must equal the request's.
 - **Replay/ordering.** CCM nonce binds `seq`; a reply whose `seq` differs from the request is rejected and the session reset.
 
@@ -55,7 +56,9 @@ Out of scope: TLS modes 1/2, NOC certificates, camera/robot passcode types, SHA-
 - **Known-answer test** (`tpap_selftest.h`, built with `-DTPAP_SELFTEST=1`): fixed `x`, randoms, salt, test password and a compressed device share; vectors produced by python-kasa's own `TpapEncryptionSession`. Checks `L`, `user_confirm`, expected `dev_confirm`, `K`, session key, base nonce and one encrypted request byte-for-byte. Runs on the board with no network.
 - **Live** against the spare plug `192.168.103.252`, then `.140`.
 
-## Review checklist (for the gateway, once its API key works)
-1. `architect`: this document — scope, failure modes, integration.
-2. `security-review`: `tpap.h` — constant-time paths, zeroization, bounds, DAC verification, RNG, the plaintext-password question.
-3. `coder-pro` / `review_code`: `tpap.h`, `kasa.h` changes, sketch changes.
+- **Rejection paths** (same self-test, after SNTP): a one-byte-different confirmation fails `ctEqual`; a garbage `dac_ca` is rejected; a forged `dac_proof` on an otherwise valid chain (the self-signed root as its own chain) is rejected by the proof check specifically.
+
+## Review (local LLM gateway, 2026-10-06)
+- `architect` (deepseek-r1:32b) on this document: 10 findings, most not applicable because the protocol fixes them (iteration count, "admin" username, SHA-1 credential, key derivation) or out of scope (encrypted RAM, CRL/OCSP for DAC). Accepted: **no back-off on repeated handshake failures** (fixed, see Security decisions), **credentials readable from flash** (documented above), **add negative tests** (added, see Tests).
+- `security-review` (deepseek-r1:32b, with and without reasoning) on `computeShare()` and the handshake: no valid findings; each was checked against the code (e.g. "unchecked return values" that are checked). A manual pass found one: `encodeW()` could reallocate and leave `w0` in freed heap; fixed by reserving the buffer (the transcript is reserved too).
+- `coder-pro` (qwen2.5-coder:32b) on the back-off and `encodeW()` changes: no bugs found.

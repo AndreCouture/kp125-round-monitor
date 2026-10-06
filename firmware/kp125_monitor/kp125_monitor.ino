@@ -152,10 +152,12 @@ void setup() {
   oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   oled.clearDisplay(); oled.display();
 #endif
+  connectWiFi();
 #if TPAP_SELFTEST
+  // After Wi-Fi so SNTP can set the clock: the DAC checks in the self-test need real time
+  for (int i = 0; i < 40 && !tpap::clockReady(); i++) delay(250);
   tpap::selfTest();
 #endif
-  connectWiFi();
   if (WiFi.status() == WL_CONNECTED) discoverPlugs();
 }
 

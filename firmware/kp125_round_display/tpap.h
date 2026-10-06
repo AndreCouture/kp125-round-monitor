@@ -69,7 +69,13 @@ struct Session {
   uint8_t key[16];      // AES-128-CCM key
   uint8_t nonce[12];    // base nonce; last 4 bytes replaced by the sequence number
   uint32_t seq = 0;     // next request sequence number
+  // Back-off after failed handshakes, so a wrong password or a misbehaving plug isn't hit with a
+  // full login every poll (TP-Link devices may lock the account). Kept across dropSession().
+  uint8_t failures = 0;
+  uint32_t lastFailMs = 0, backoffMs = 0;
 };
+
+const uint32_t BACKOFF_FIRST_MS = 3000, BACKOFF_MAX_MS = 300000;   // 3 s doubling to 5 min
 
 static void dropSession(Session& s) {
   mbedtls_platform_zeroize(s.key, sizeof(s.key));
@@ -211,7 +217,9 @@ static void len8le(Bytes& t, const uint8_t* p, size_t n) {
 static Bytes encodeW(const mbedtls_mpi& w) {
   size_t n = mbedtls_mpi_size(&w);
   if (n == 0) n = 1;
-  Bytes out(n);
+  Bytes out;
+  out.reserve(n + 1);   // room for the prefix: inserting never reallocates, so w0 isn't left in freed heap
+  out.resize(n);
   mbedtls_mpi_write_binary(&w, out.data(), n);
   if (n % 2 == 1 && (out[0] & 0x80)) out.insert(out.begin(), 0);
   return out;
@@ -299,6 +307,7 @@ static bool computeShare(const Bytes& cred, const Bytes& salt, uint32_t iteratio
     mbedtls_md(sha, c.data(), c.size(), ctx);
 
     w0enc = encodeW(w0);
+    transcript.reserve(10 * 8 + 32 + 6 * 65 + w0enc.size());   // one allocation, wiped at the end
     len8le(transcript, ctx, 32);
     len8le(transcript, nullptr, 0);
     len8le(transcript, nullptr, 0);
@@ -605,18 +614,38 @@ static bool request(const char* ip, Session& s, const char* json, String& reply,
   return true;
 }
 
+// Handshake with back-off: after a failure, wait BACKOFF_FIRST_MS, doubling up to BACKOFF_MAX_MS,
+// before trying again; a success resets it. Waiting for NTP is not a failure (nothing is sent).
+static bool loginWithBackoff(const char* ip, const char* user, const char* pass, Session& s, String& err) {
+  if (s.failures && millis() - s.lastFailMs < s.backoffMs) {
+    err = String("TPAP backing off after ") + s.failures + " failed login(s), retry in " +
+          (s.backoffMs - (millis() - s.lastFailMs)) / 1000 + " s";
+    return false;
+  }
+  if (!clockReady()) { err = "TPAP waiting for NTP time (needed to check the plug's certificates)"; return false; }
+  if (handshake(ip, user, pass, s, err)) {
+    s.failures = 0;
+    s.backoffMs = 0;
+    return true;
+  }
+  if (s.failures < 255) s.failures++;
+  s.backoffMs = s.failures >= 8 ? BACKOFF_MAX_MS : min(BACKOFF_MAX_MS, BACKOFF_FIRST_MS << (s.failures - 1));
+  s.lastFailMs = millis();
+  return false;
+}
+
 // Send one SMART JSON request, logging in first if needed. A failure on an existing session
 // (e.g. it expired) gets one fresh handshake and retry.
 static bool query(const char* ip, const char* user, const char* pass, Session& s, const char* json,
                   String& reply, String& err) {
   bool fresh = false;
   if (!s.active) {
-    if (!handshake(ip, user, pass, s, err)) return false;
+    if (!loginWithBackoff(ip, user, pass, s, err)) return false;
     fresh = true;
   }
   if (request(ip, s, json, reply, err)) return true;
   if (fresh) return false;
-  if (!handshake(ip, user, pass, s, err)) return false;
+  if (!loginWithBackoff(ip, user, pass, s, err)) return false;
   return request(ip, s, json, reply, err);
 }
 

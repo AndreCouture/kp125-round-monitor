@@ -85,6 +85,24 @@ static bool selfTest() {
   Serial.printf("  %-22s %s%s\n", "root CA parses", rootOk ? "ok" : "FAIL", clockReady() ? "" : " (clock not set: validity unchecked)");
   ok &= rootOk || !clockReady();
 
+  // Rejection paths: a wrong confirmation, a garbage certificate, a forged attestation proof
+  uint8_t a[32] = {0}, b[32] = {0}, key[32], nonce[32];
+  b[31] = 1;
+  bool ct = ctEqual(a, a, 32) && !ctEqual(a, b, 32);
+  Serial.printf("  %-22s %s\n", "confirm mismatch caught", ct ? "ok" : "FAIL");
+  rng(nullptr, key, sizeof(key));
+  rng(nullptr, nonce, sizeof(nonce));
+  String e1, e2;
+  bool garbage = !verifyDac("bm90IGEgY2VydGlmaWNhdGU=", "", "AAAA", key, nonce, e1);   // "not a certificate"
+  Serial.printf("  %-22s %s (%s)\n", "garbage DAC rejected", garbage ? "ok" : "FAIL", e1.c_str());
+  // The self-signed root passes as its own chain, so only the proof check can reject this
+  uint8_t fake[70];
+  rng(nullptr, fake, sizeof(fake));
+  bool forged = !verifyDac(ROOT_CA_PEM, "", b64(fake, sizeof(fake)).c_str(), key, nonce, e2);
+  bool viaProof = e2.indexOf("proof") >= 0;
+  Serial.printf("  %-22s %s (%s)\n", "forged proof rejected", forged && (viaProof || !clockReady()) ? "ok" : "FAIL", e2.c_str());
+  ok &= ct && garbage && forged && (viaProof || !clockReady());
+
   so.wipe();
   dropSession(s);
   Serial.println(ok ? "TPAP self-test PASSED" : "TPAP self-test FAILED");
