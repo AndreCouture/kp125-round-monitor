@@ -45,6 +45,9 @@ const PlugCfg PLUGS[] = { PLUGS_INIT };   // up to ~10 fit the status dots
 const size_t N_PLUGS = sizeof(PLUGS) / sizeof(PLUGS[0]);
 
 const float    MAX_W        = 1440;   // gauge full-scale: 15 A x 120 V x 80% continuous-load limit
+// Estimated cost = kWh x RATE_PER_KWH: energy only (no delivery, fixed charges or tax). 0 hides it.
+const float    RATE_PER_KWH = 0.11142;  // flat rate in CURRENCY per kWh (11.142 cents/kWh)
+const char*    CURRENCY     = "$";
 const uint32_t POLL_MS      = 3000;   // plug polling interval
 const uint32_t USAGE_MS     = 60000;  // how often to fetch today's/month's kWh from the plugs
 const uint32_t PAGE_TIMEOUT_MS = 20000;   // back to the gauge after this long without a touch
@@ -487,6 +490,19 @@ bool sumKwh(bool month, float& out) {
   return any;
 }
 
+// Estimated cost of kwh as "≈ $0.42" (3 decimals below 0.10 so short tasks don't read 0.00), or
+// "$0.79" when compact (per-plug lines). False when cost is hidden or kwh is unknown.
+const uint16_t COL_COST = rgb(215, 185, 110);   // muted gold
+bool costText(double kwh, char* buf, size_t n, bool compact = false) {
+  if (RATE_PER_KWH <= 0 || isnan(kwh)) return false;
+  double c = kwh * RATE_PER_KWH;
+  if (compact)       snprintf(buf, n, "%s%.2f", CURRENCY, c);
+  else if (c < 0.10) snprintf(buf, n, "≈ %s%.3f", CURRENCY, c);
+  else if (c < 100)  snprintf(buf, n, "≈ %s%.2f", CURRENCY, c);
+  else               snprintf(buf, n, "≈ %s%.0f", CURRENCY, c);
+  return true;
+}
+
 void drawToday() {
   char buf[32], t[8];
   textCentered("TODAY", 58, F_TITLE, COL_DIM);
@@ -501,19 +517,21 @@ void drawToday() {
     }
   }
   float kwh;
-  if (sumKwh(false, kwh)) snprintf(buf, sizeof(buf), "%.2f", kwh); else snprintf(buf, sizeof(buf), "--");
-  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 120);
+  bool haveKwh = sumKwh(false, kwh);
+  if (haveKwh) snprintf(buf, sizeof(buf), "%.2f", kwh); else snprintf(buf, sizeof(buf), "--");
+  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 116);
+  if (haveKwh && costText(kwh, buf, sizeof(buf))) textCentered(buf, 134, F_TEXT, COL_COST);
   if (isnan(s.peakW)) {
-    textCentered("peak/low: waiting", 152, F_TEXT, COL_DIM);
+    textCentered("peak/low: waiting", 160, F_TEXT, COL_DIM);
   } else {
     snprintf(buf, sizeof(buf), "peak %.0f W", s.peakW);
-    textCentered(buf, 148, F_LINE, loadColor(s.peakW / MAX_W));
+    textCentered(buf, 156, F_LINE, loadColor(s.peakW / MAX_W));
     hhmm(s.peakAt, t, sizeof(t)); snprintf(buf, sizeof(buf), "at %s", t);
-    textCentered(buf, 163, F_SMALL, COL_DIM);
+    textCentered(buf, 170, F_SMALL, COL_DIM);
     snprintf(buf, sizeof(buf), "low %.0f W", s.lowW);
-    textCentered(buf, 185, F_LINE, COL_GREEN);
+    textCentered(buf, 189, F_LINE, COL_GREEN);
     hhmm(s.lowAt, t, sizeof(t)); snprintf(buf, sizeof(buf), "at %s", t);
-    textCentered(buf, 200, F_SMALL, COL_DIM);
+    textCentered(buf, 203, F_SMALL, COL_DIM);
   }
 }
 
@@ -538,23 +556,24 @@ void drawTask() {
   if (t.kwh < 1)       snprintf(buf, sizeof(buf), "%.3f", t.kwh);
   else if (t.kwh < 10) snprintf(buf, sizeof(buf), "%.2f", t.kwh);
   else                 snprintf(buf, sizeof(buf), "%.1f", t.kwh);
-  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 108);
+  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 104);
+  if (costText(t.kwh, buf, sizeof(buf))) textCentered(buf, 122, F_TEXT, COL_COST);
 
   long secs = tpap::clockReady() ? (long)(time(nullptr) - t.start) : 0;
   if (secs < 0) secs = 0;
   if (secs < 3600) snprintf(buf, sizeof(buf), "%ldm %02lds", secs / 60, secs % 60);
   else             snprintf(buf, sizeof(buf), "%ldh %02ldm", secs / 3600, (secs / 60) % 60);
-  textCentered(buf, 136, F_LINE, COL_TEXT);
+  textCentered(buf, 145, F_LINE, COL_TEXT);
   if (secs >= 10) {
     float avg = wh * 3600.0 / secs;
     snprintf(buf, sizeof(buf), "avg %.0f W", avg);
-    textCentered(buf, 157, F_TEXT, loadColor(avg / MAX_W));
+    textCentered(buf, 164, F_TEXT, loadColor(avg / MAX_W));
   }
   if (t.peakW > 0) {
     snprintf(buf, sizeof(buf), "max %.0f W", t.peakW);
-    textCentered(buf, 177, F_TEXT, loadColor(t.peakW / MAX_W));
+    textCentered(buf, 182, F_TEXT, loadColor(t.peakW / MAX_W));
   }
-  textCentered(flash ? "started" : "hold to reset", 199, F_SMALL, flash ? COL_GREEN : COL_DIM);
+  textCentered(flash ? "started" : "hold to reset", 201, F_SMALL, flash ? COL_GREEN : COL_DIM);
 }
 
 void drawMonth() {
@@ -566,13 +585,18 @@ void drawMonth() {
   localtime_r(&now, &lt);
   textCentered(tpap::clockReady() ? MONTHS[lt.tm_mon] : "MONTH", 58, F_TITLE, COL_DIM);
   float kwh;
-  if (sumKwh(true, kwh)) snprintf(buf, sizeof(buf), "%.1f", kwh); else snprintf(buf, sizeof(buf), "--");
-  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 112);
+  bool haveKwh = sumKwh(true, kwh);
+  if (haveKwh) snprintf(buf, sizeof(buf), "%.1f", kwh); else snprintf(buf, sizeof(buf), "--");
+  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 108);
+  if (haveKwh && costText(kwh, buf, sizeof(buf))) textCentered(buf, 126, F_TEXT, COL_COST);
   // per-plug breakdown: regular text for up to 3 plugs, small for up to 5
   bool big = N_PLUGS <= 3;
-  int y = big ? 142 : 136, step = big ? 21 : 14;
+  int y = big ? 150 : 145, step = big ? 21 : 14;
+  char cost[16];
   for (size_t i = 0; i < N_PLUGS && i < 5; i++, y += step) {
     if (isnan(snap[i].monthKwh)) snprintf(buf, sizeof(buf), "%s  --", PLUGS[i].name);
+    else if (costText(snap[i].monthKwh, cost, sizeof(cost), true))
+      snprintf(buf, sizeof(buf), "%s  %.1f kWh  %s", PLUGS[i].name, snap[i].monthKwh, cost);
     else snprintf(buf, sizeof(buf), "%s  %.1f kWh", PLUGS[i].name, snap[i].monthKwh);
     textCentered(buf, y, big ? F_TEXT : F_SMALL, COL_TEXT);
   }

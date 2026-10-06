@@ -17,6 +17,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ASCII = "".join(chr(c) for c in range(0x20, 0x7F))
+TEXT = ASCII + "≈"   # + "≈" for the estimated-cost lines
 DIGITS = " -.0123456789:"
 
 # (C name, TTF file, pixel size, characters)
@@ -25,8 +26,8 @@ FONTS = [
     ("INTER_NUM40", "Inter-SemiBold.ttf", 40, DIGITS),   # page values
     ("INTER_SB15",  "Inter-SemiBold.ttf", 15, ASCII),    # titles
     ("INTER_SB19",  "Inter-SemiBold.ttf", 19, ASCII),    # units, emphasised lines
-    ("INTER_R16",   "Inter-Regular.ttf",  16, ASCII),    # secondary lines
-    ("INTER_R13",   "Inter-Regular.ttf",  13, ASCII),    # hints, times
+    ("INTER_R16",   "Inter-Regular.ttf",  16, TEXT),    # secondary lines
+    ("INTER_R13",   "Inter-Regular.ttf",  13, TEXT),    # hints, times
 ]
 
 
