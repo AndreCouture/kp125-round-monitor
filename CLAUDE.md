@@ -14,7 +14,10 @@ A small desk gadget that shows live electricity use from TP-Link Kasa **KP125** 
 firmware/kp125_round_display/   main sketch for the round display (Arduino, primary)
 firmware/kp125_monitor/         serial-only version, handy for testing plug comms on any ESP32
 stand/display_stand.scad        stand + cap, parametric, first draft
+docs/setup.md                   user guide: parts, supported plugs, configuration, settings, troubleshooting
 docs/hardware.md                pinout, dimensions, protocol notes, sources
+docs/tpap-design.md             TPAP client design, security decisions, review
+tools/make_vlw.py               generates the anti-aliased display fonts (fonts_inter.h)
 docs/photos/board.jpeg          photo of the board back
 ```
 

@@ -1,0 +1,130 @@
+# Setup guide
+
+## 1. What you need
+
+| Part | Notes | Where to buy |
+| :--- | :--- | :--- |
+| **Waveshare ESP32-S3-Touch-LCD-1.28** | The **touch** version. Round 1.28" 240×240 touch display, ESP32-S3, 16 MB flash, 2 MB PSRAM. The non-touch ESP32-S3-LCD-1.28 uses different display pins and shows a black screen with this firmware. | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1.28.htm) · [Amazon.com](https://www.amazon.com/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) · [Amazon.ca](https://www.amazon.ca/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) |
+| **TP-Link Kasa KP125M** smart plug(s) | Matter, energy monitoring, 15 A / 1800 W, 2.4 GHz Wi-Fi. One or more. | [TP-Link](https://www.tp-link.com/us/home-networking/smart-plug/kp125m/) · [Amazon.com](https://www.amazon.com/s?k=Kasa+KP125M) · [Amazon.ca](https://www.amazon.ca/s?k=Kasa+KP125M) |
+| USB-C cable + 5 V USB power adapter | The cable must carry data for flashing. The stand is designed for a **straight** USB-C plug. | Any |
+| 3D printer + PLA *(optional)* | For the desk stand. | — |
+
+The Amazon links are searches for the exact model, so they stay current; check that the listing says **ESP32-S3-Touch-LCD-1.28** (touch) and **KP125M**.
+
+## 2. Supported smart plugs
+
+| Plug | Protocol | Status |
+| :--- | :--- | :--- |
+| Kasa KP125M, firmware 1.4.1 | TPAP (SPAKE2+ login, AES-128-CCM, device certificate check) | **Tested** |
+| Kasa plugs on the older local protocol (TCP port 9999), e.g. KP115, HS110, older KP125 firmware | Legacy Kasa | Implemented, not tested on real hardware |
+| Kasa/Tapo SMART plugs that use KLAP | KLAP | Implemented, not tested on real hardware |
+
+The firmware picks the protocol for each plug automatically on first contact. Multi-outlet power strips (e.g. HS300) are not supported. Energy monitoring is required; plugs without it cannot be read.
+
+## 3. Prepare the plugs
+
+1. Set each plug up in the Kasa app on a **2.4 GHz** Wi-Fi network. Note the TP-Link account email and password: KP125M plugs need them for local access.
+2. In your router, give each plug a **DHCP reservation** so its IP address never changes.
+3. The display must be on a network that can reach the plugs (for example the same IoT Wi-Fi).
+4. Optional: Kasa app → Me → Settings → **Third Party Compatibility**. On KP125M firmware 1.4.1 this did not change the protocol, and the firmware does not need it.
+
+## 4. Install the toolchain
+
+- `arduino-cli` (or the Arduino IDE) with the board package **esp32 by Espressif** 3.x.
+- Libraries from the Library Manager: **LovyanGFX** and **ArduinoJson** (v7).
+- Board settings: **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **enabled**. With arduino-cli the FQBN is `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled`.
+- After cloning, enable the commit guard that blocks committing credentials:
+  ```
+  git config core.hooksPath .githooks
+  ```
+
+## 5. Configure `secrets.h`
+
+Each sketch folder (`firmware/kp125_round_display` and `firmware/kp125_monitor`) needs its own `secrets.h`, copied from `secrets.example.h`. It is git-ignored; never commit it.
+
+```c
+#define WIFI_SSID "your-ssid"
+#define WIFI_PASS "your-password"
+
+// TP-Link (Kasa app) account, only needed for plugs on KLAP or TPAP firmware
+#define KASA_USER "you@example.com"
+#define KASA_PASS "your-kasa-password"
+
+// {"label", "ip"} per plug
+#define PLUGS_INIT \
+  {"Desk",   "192.168.1.50"}, \
+  {"Fridge", "192.168.1.51"},
+```
+
+- Labels are shown on screen.
+- The Wi-Fi must be 2.4 GHz.
+- Credentials are compiled into the firmware and stored in the board's flash in plain text (see [Security notes](#11-security-notes)).
+
+## 6. Settings
+
+They are at the top of `firmware/kp125_round_display/kp125_round_display.ino`; change them and re-flash.
+
+| Setting | Default | Meaning |
+| :--- | :--- | :--- |
+| `MAX_W` | `1440` | Gauge full scale and "W left" headroom. 1440 = 15 A × 120 V × 80 % continuous load. |
+| `RATE_PER_KWH` | `0.11142` | Your electricity rate per kWh for the cost estimate; `0` hides cost. Energy only: no delivery, fixed charges or tax. |
+| `CURRENCY` | `"$"` | Shown before costs. |
+| `TZ_INFO` | `"EST5EDT,M3.2.0,M11.1.0"` | POSIX time zone; used for midnight resets, night dimming and daily history. |
+| `NIGHT_FROM` / `NIGHT_TO` | `22` / `7` | Night dimming window in local hours (may wrap midnight; equal values = never dim). Can also be set at build time, e.g. `-DNIGHT_FROM=12 -DNIGHT_TO=14`, to test during the day. |
+| `DAY_BRIGHTNESS` / `NIGHT_BRIGHTNESS` | `255` / `12` | Backlight levels 0–255; `0` turns the screen off at night. |
+| `WAKE_MS` | `30000` | How long a touch keeps the screen bright at night. |
+| `POLL_MS` | `3000` | How often each plug is read. |
+| `PAGE_TIMEOUT_MS` | `20000` | TODAY, MONTH and 7 DAYS return to the gauge after this long without a touch. |
+
+## 7. Flash and first boot
+
+1. *Optional but useful:* flash `firmware/kp125_monitor` first and open the serial monitor at **115200** baud. It prints each plug's power, voltage, current and energy, or why a plug did not answer.
+2. Flash `firmware/kp125_round_display`, for example:
+   ```
+   arduino-cli compile -b esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled firmware/kp125_round_display
+   arduino-cli upload  -b esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled -p <port> firmware/kp125_round_display
+   ```
+3. On first boot the board joins Wi-Fi, gets the time over NTP (needed to verify the plugs' certificates; readings start a few seconds later), then logs in to each plug.
+4. If an upload fails: hold **BOOT**, tap **RESET**, release **BOOT**, and upload again.
+
+## 8. Using the display
+
+**Gestures:** tap or swipe right = next page · swipe left = previous page · swipe up/down = change plug or meter where a page has several · press and hold = reset (TASK page).
+
+| Page | Shows |
+| :--- | :--- |
+| **Gauge** | Total power on an arc gauge (green below 50 % of `MAX_W`, amber to 80 %, red above), "W left" headroom, and the selected plug's power, volts and amps (swipe up/down to change plug). Dots show which plugs are online. |
+| **TASK** | Task meters: one for all plugs and one per plug (swipe up/down). Press and hold about 1.2 s to reset and start the meter shown. Shows energy, estimated cost, elapsed time, average and max power. Saved to flash, so it survives reboots. |
+| **TODAY** | Today's kWh and cost, plus the day's peak and lowest total power with their times. |
+| **MONTH** | This month's kWh and cost, total and per plug. |
+| **7 DAYS** | Daily kWh bars for the last 7 days from the plugs' own history, with the 7-day total and cost (swipe up/down for all plugs or one plug). |
+
+At night the screen dims; the first touch only wakes it. It stays bright if total power is above `MAX_W`.
+
+## 9. Print the stand
+
+- File: `stand/display_stand.scad` (OpenSCAD). Parts: `stand`, `cap`, `fit_test`, e.g.
+  ```
+  openscad -o stand.stl -D 'PART="stand"' stand/display_stand.scad
+  ```
+- Print **`fit_test`** first (a small ring) to check how the board fits.
+- The stand prints **front face down** with no supports except a short bridge over the cable tunnel; the cap prints flat.
+- The board sits in the ring from the back and the cap presses in behind it. The USB-C cable goes down a channel under the display and leaves through a side tunnel.
+- Board dimensions come from Waveshare's drawing. `plug_straight` (default 30 mm, the rigid length of a straight USB-C plug) sets the pedestal height: measure yours.
+
+## 10. Troubleshooting
+
+| Symptom | Cause / fix |
+| :--- | :--- |
+| Screen stays black | Non-touch board. This firmware is for the touch version (backlight GPIO2, reset GPIO14). |
+| `TPAP waiting for NTP time` | The board can't reach an NTP server yet; it needs internet access for the time. |
+| `plug confirmation mismatch (wrong KASA_PASS?)` | `KASA_USER` / `KASA_PASS` don't match the TP-Link account the plugs belong to. |
+| `backing off after N failed login(s)` | Repeated login failures: the firmware waits 3 s, doubling to 5 min, between attempts so the plug isn't flooded. |
+| `port 9999 timed out` | Wrong IP, plug offline, or the display is on a network that can't reach the plug. |
+| A 7 DAYS bar shows `-` | That day's history couldn't be read yet; it retries every 2 minutes. `--` instead of bars means the plug has no daily history (legacy protocol). |
+
+## 11. Security notes
+
+- Credentials live only in `secrets.h`, which is git-ignored; the pre-commit hook refuses commits containing them.
+- Anyone with physical access to the board can read the credentials from flash. ESP32 flash encryption would prevent that but is a permanent change to the chip, so it is not enabled.
+- TPAP plugs are checked against TP-Link's root certificate before any data is trusted.

@@ -1,36 +1,56 @@
 # KP125 Round Power Monitor
 
-Live power readout from TP-Link Kasa KP125 smart plugs on a Waveshare ESP32-S3 1.28" round display, in a 3D-printed desk stand.
+A round touch display on your desk that shows live electricity use from TP-Link Kasa smart plugs, read directly over your home network, in a 3D-printed stand.
 
-## Hand this to Claude Code
-1. Unzip somewhere, e.g. `~/projects/kp125-round-monitor`.
-2. Plug the board in over USB-C.
-3. In that folder run `claude` and say something like:
-   > Read CLAUDE.md and continue the project. Start with task 1.
+## Features
 
-Claude Code will pick up the context, task list and current status from `CLAUDE.md`.
+- Live total power on an arc gauge, with headroom against your circuit limit (`MAX_W`).
+- Per-plug power, voltage and current.
+- Task meters (all plugs or one plug): press and hold to start; energy, cost, time, average and max; they survive reboots.
+- Today, this month and a 7-day history, with an estimated cost from your electricity rate.
+- Night dimming with touch to wake.
+- Talks to the plugs locally, no cloud: Kasa KP125M over TPAP (TP-Link's newer encrypted protocol, with a device certificate check), plus legacy Kasa and KLAP.
 
-## Secrets
-Wi-Fi and TP-Link credentials live only in each sketch's git-ignored `secrets.h` (copy `secrets.example.h`). After cloning, enable the guard that refuses commits containing them:
+## Parts
+
+| Part | Where to buy |
+|---|---|
+| Waveshare **ESP32-S3-Touch-LCD-1.28** (touch version) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1.28.htm) · [Amazon.com](https://www.amazon.com/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) · [Amazon.ca](https://www.amazon.ca/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) |
+| TP-Link Kasa **KP125M** smart plug(s) | [TP-Link](https://www.tp-link.com/us/home-networking/smart-plug/kp125m/) · [Amazon.com](https://www.amazon.com/s?k=Kasa+KP125M) · [Amazon.ca](https://www.amazon.ca/s?k=Kasa+KP125M) |
+| USB-C cable (straight plug) and 5 V USB power adapter | Any |
+| *Optional:* 3D printer and PLA for the stand | — |
+
+See [docs/setup.md](docs/setup.md) for details and the list of supported plugs.
+
+## Quick start
+
+1. Set up the plugs in the Kasa app on 2.4 GHz Wi-Fi and give each a DHCP reservation.
+2. Install `arduino-cli` with "esp32 by Espressif" 3.x and the libraries LovyanGFX and ArduinoJson.
+3. In `firmware/kp125_round_display`, copy `secrets.example.h` to `secrets.h` and fill in Wi-Fi, your TP-Link account and the plug IPs.
+4. Set `MAX_W` and `RATE_PER_KWH` at the top of `kp125_round_display.ino`.
+5. Flash it with FQBN `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled`.
+6. Print the stand from `stand/display_stand.scad` (`fit_test` first).
+7. After cloning, run `git config core.hooksPath .githooks` so credentials can't be committed.
+
+## Documentation
+
+- [docs/setup.md](docs/setup.md): parts, supported plugs, configuration, settings, using the display, the stand, troubleshooting.
+- [docs/hardware.md](docs/hardware.md): board pinout and dimensions, plug protocols and the energy requests used.
+- [docs/tpap-design.md](docs/tpap-design.md): how the TPAP client works, its security decisions and review.
+- [CLAUDE.md](CLAUDE.md): project brief and status for Claude Code.
+
+## Repository layout
+
+```text
+firmware/kp125_round_display/   the display firmware (main sketch)
+firmware/kp125_monitor/         serial-only plug reader, useful for testing plugs
+stand/display_stand.scad        parametric desk stand and back cap (OpenSCAD)
+tools/make_vlw.py               generates the display fonts
+docs/                           guides and notes
 ```
-git config core.hooksPath .githooks
-```
 
-## Doing it by hand
-**Firmware (Arduino IDE)**
-- Boards Manager: *esp32 by Espressif*. Board: **ESP32S3 Dev Module**, Flash Size 16MB, PSRAM enabled.
-- Libraries: **LovyanGFX** (lovyan03) and **ArduinoJson** v7. The display fonts (Inter, anti-aliased) are generated into `fonts_inter.h` by `tools/make_vlw.py`.
-- Open `firmware/kp125_monitor` first, set Wi-Fi + plug IPs, flash, and check the Serial Monitor (115200) shows readings.
-- Then flash `firmware/kp125_round_display` with the same settings, and set `MAX_W` to your gauge full-scale (e.g. circuit limit).
-- If upload fails: hold BOOT, tap RESET, release BOOT, upload again.
+## Credits
 
-**Stand (OpenSCAD)**
-- Measure your board and update the "measure these" block at the top of `stand/display_stand.scad`.
-- Print `PART="fit_test"` first (tiny ring) to check the fit, then `stand` and `cap`.
-- Stand prints front-face-down, no supports. The board drops in from the back; the cap presses in behind it.
-
-## Files
-- `CLAUDE.md` — project brief + task list for Claude Code
-- `docs/hardware.md` — pinout, dimensions, plug protocol notes
-- `firmware/` — Arduino sketches
-- `stand/display_stand.scad` — parametric stand + cap
+- TPAP protocol details come from [python-kasa pull request #1592](https://github.com/python-kasa/python-kasa/pull/1592).
+- Display fonts: [Inter](https://github.com/rsms/inter), SIL Open Font License 1.1 (see `fonts/Inter-LICENSE.txt`).
+- Board dimensions from Waveshare's ESP32-S3-Touch-LCD-1.28 drawing.
