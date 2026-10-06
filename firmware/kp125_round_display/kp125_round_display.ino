@@ -103,6 +103,7 @@ struct Task {
   bool running = false;
   time_t start = 0;
   double kwh = 0;                 // accumulated since start
+  float peakW = 0;                // highest total power seen in a poll (3 s samples)
   double last[N_PLUGS];           // each plug's counter at its last reading
   bool haveLast[N_PLUGS];
 };
@@ -157,6 +158,7 @@ void saveTask() {
   prefs.putBool("run", t.running);
   prefs.putLong64("start", (int64_t)t.start);
   prefs.putDouble("kwh", t.kwh);
+  prefs.putFloat("peak", t.peakW);
   prefs.putBytes("last", t.last, sizeof(t.last));
   prefs.putBytes("have", t.haveLast, sizeof(t.haveLast));
   prefs.putUInt("n", N_PLUGS);
@@ -169,6 +171,7 @@ void loadTask() {
   task.running = prefs.getBool("run", false);
   task.start = (time_t)prefs.getLong64("start", 0);
   task.kwh = prefs.getDouble("kwh", 0);
+  task.peakW = prefs.getFloat("peak", 0);
   if (prefs.getBytes("last", task.last, sizeof(task.last)) != sizeof(task.last) ||
       prefs.getBytes("have", task.haveLast, sizeof(task.haveLast)) != sizeof(task.haveLast))
     for (size_t i = 0; i < N_PLUGS; i++) task.haveLast[i] = false;
@@ -180,6 +183,7 @@ void resetTask() {
   task.running = true;
   task.start = time(nullptr);
   task.kwh = 0;
+  task.peakW = 0;
   for (size_t i = 0; i < N_PLUGS; i++) {
     task.haveLast[i] = readings[i].seen && readings[i].online;
     task.last[i] = readings[i].kwh;
@@ -248,6 +252,9 @@ void pollTask(void*) {
       allOnline &= r.online;
     }
     if (allOnline) updateDayStats(total);
+    portENTER_CRITICAL(&readMux);
+    if (task.running && total > task.peakW) task.peakW = total;   // an offline plug can only lower the total
+    portEXIT_CRITICAL(&readMux);
     // Save the task after a reset, and every 5 min while it runs (limits flash wear)
     bool running;
     portENTER_CRITICAL(&readMux);
@@ -432,13 +439,17 @@ void drawTask() {
   if (secs < 0) secs = 0;
   if (secs < 3600) snprintf(buf, sizeof(buf), "%ldm %02lds", secs / 60, secs % 60);
   else             snprintf(buf, sizeof(buf), "%ldh %02ldm", secs / 3600, (secs / 60) % 60);
-  textCentered(buf, 142, 2, COL_TEXT);
+  textCentered(buf, 140, 2, COL_TEXT);
   if (secs >= 10) {
     float avg = wh * 3600.0 / secs;
     snprintf(buf, sizeof(buf), "avg %.0f W", avg);
-    textCentered(buf, 164, 2, loadColor(avg / MAX_W));
+    textCentered(buf, 160, 2, loadColor(avg / MAX_W));
   }
-  textCentered(flash ? "started" : "hold to reset", 192, 1, flash ? COL_GREEN : COL_DIM);
+  if (t.peakW > 0) {
+    snprintf(buf, sizeof(buf), "max %.0f W", t.peakW);
+    textCentered(buf, 180, 2, loadColor(t.peakW / MAX_W));
+  }
+  textCentered(flash ? "started" : "hold to reset", 202, 1, flash ? COL_GREEN : COL_DIM);
 }
 
 void drawMonth() {
