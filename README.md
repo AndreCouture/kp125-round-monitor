@@ -10,6 +10,12 @@ Live power readout from TP-Link Kasa KP125 smart plugs on a Waveshare ESP32-S3 1
 
 Claude Code will pick up the context, task list and current status from `CLAUDE.md`.
 
+## Secrets
+Wi-Fi and TP-Link credentials live only in each sketch's git-ignored `secrets.h` (copy `secrets.example.h`). After cloning, enable the guard that refuses commits containing them:
+```
+git config core.hooksPath .githooks
+```
+
 ## Doing it by hand
 **Firmware (Arduino IDE)**
 - Boards Manager: *esp32 by Espressif*. Board: **ESP32S3 Dev Module**, Flash Size 16MB, PSRAM enabled.
