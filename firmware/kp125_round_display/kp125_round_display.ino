@@ -11,6 +11,7 @@
 // Libraries (Arduino Library Manager):
 //   - GFX Library for Arduino  (by moononournation, "Arduino_GFX")
 //   - ArduinoJson v7
+//   - U8g2 (by olikraus; only its fonts are used)
 // Board settings: "ESP32S3 Dev Module", Flash 16MB, PSRAM "QSPI PSRAM".
 // The board's USB goes through a CH343 serial chip, so USB CDC On Boot can stay disabled.
 
@@ -19,6 +20,7 @@
 #include <Preferences.h>
 #include <time.h>
 #include <ArduinoJson.h>
+#include <U8g2lib.h>              // font data only; must precede Arduino_GFX (its U8g2Font example does the same)
 #include <Arduino_GFX_Library.h>
 #include <vector>
 
@@ -288,12 +290,46 @@ void drawArc(int cx, int cy, int r1, int r2, float a0, float a1, uint16_t col) {
   gfx->fillCircle(cx + cosf(a1 * DEG_TO_RAD) * rc, cy + sinf(a1 * DEG_TO_RAD) * rc, cr, col);
 }
 
-void textCentered(const char* s, int y, uint8_t size, uint16_t col) {
-  int w = strlen(s) * 6 * size;          // built-in font is 6x8 per char
-  gfx->setTextSize(size);
+// u8g2 fonts, drawn at their native size (crisper than scaling the 6x8 font); y is the baseline
+const uint8_t* const F_BIG   = u8g2_font_logisoso46_tn;   // gauge total (digits only)
+const uint8_t* const F_NUM   = u8g2_font_logisoso38_tn;   // page values (digits only)
+const uint8_t* const F_TITLE = u8g2_font_helvB12_tr;      // page titles
+const uint8_t* const F_LINE  = u8g2_font_helvB14_tr;      // units, emphasised lines
+const uint8_t* const F_TEXT  = u8g2_font_helvR12_tr;      // secondary lines
+const uint8_t* const F_SMALL = u8g2_font_helvR10_tr;      // hints, times
+
+// Width of s in font; xoff gets the left bearing so drawing can be pixel-exact
+int textWidth(const char* s, const uint8_t* font, int16_t* xoff = nullptr) {
+  gfx->setFont(font);
+  gfx->setTextSize(1);
+  int16_t x1, y1;
+  uint16_t w, h;
+  gfx->getTextBounds(s, 0, 100, &x1, &y1, &w, &h);
+  if (xoff) *xoff = x1;
+  return w;
+}
+
+void textCentered(const char* s, int y, const uint8_t* font, uint16_t col) {
+  int16_t xoff;
+  int w = textWidth(s, font, &xoff);
   gfx->setTextColor(col);
-  gfx->setCursor(120 - w / 2, y);
+  gfx->setCursor(120 - w / 2 - xoff, y);
   gfx->print(s);
+}
+
+// A number with its unit to the right ("141 W"), centred as one group
+void valueUnit(const char* v, const uint8_t* font, uint16_t col, const char* unit, int y) {
+  int16_t vx, ux;
+  int vw = textWidth(v, font, &vx), uw = textWidth(unit, F_LINE, &ux), gap = 6;
+  int x = 120 - (vw + gap + uw) / 2;
+  gfx->setFont(font);
+  gfx->setTextColor(col);
+  gfx->setCursor(x - vx, y);
+  gfx->print(v);
+  gfx->setFont(F_LINE);
+  gfx->setTextColor(COL_DIM);
+  gfx->setCursor(x + vw + gap - ux, y);
+  gfx->print(unit);
 }
 
 uint16_t loadColor(float frac) {
@@ -386,7 +422,7 @@ bool sumKwh(bool month, float& out) {
 
 void drawToday() {
   char buf[32], t[8];
-  textCentered("TODAY", 44, 2, COL_DIM);
+  textCentered("TODAY", 58, F_TITLE, COL_DIM);
   const DayStats& s = statsSnap;
   if (s.since) {                                 // tracking began after midnight, e.g. after a reboot
     struct tm a;
@@ -394,62 +430,60 @@ void drawToday() {
     if (a.tm_hour || a.tm_min > 1) {
       hhmm(s.since, t, sizeof(t));
       snprintf(buf, sizeof(buf), "peak/low since %s", t);
-      textCentered(buf, 64, 1, COL_DIM);
+      textCentered(buf, 74, F_SMALL, COL_DIM);
     }
   }
   float kwh;
   if (sumKwh(false, kwh)) snprintf(buf, sizeof(buf), "%.2f", kwh); else snprintf(buf, sizeof(buf), "--");
-  textCentered(buf, 76, 5, COL_TEXT);            // 40 px tall
-  textCentered("kWh", 120, 2, COL_DIM);
+  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 120);
   if (isnan(s.peakW)) {
-    textCentered("peak/low: waiting", 150, 1, COL_DIM);
+    textCentered("peak/low: waiting", 152, F_TEXT, COL_DIM);
   } else {
     snprintf(buf, sizeof(buf), "peak %.0f W", s.peakW);
-    textCentered(buf, 144, 2, loadColor(s.peakW / MAX_W));
+    textCentered(buf, 148, F_LINE, loadColor(s.peakW / MAX_W));
     hhmm(s.peakAt, t, sizeof(t)); snprintf(buf, sizeof(buf), "at %s", t);
-    textCentered(buf, 162, 1, COL_DIM);
+    textCentered(buf, 163, F_SMALL, COL_DIM);
     snprintf(buf, sizeof(buf), "low %.0f W", s.lowW);
-    textCentered(buf, 176, 2, COL_GREEN);
+    textCentered(buf, 185, F_LINE, COL_GREEN);
     hhmm(s.lowAt, t, sizeof(t)); snprintf(buf, sizeof(buf), "at %s", t);
-    textCentered(buf, 194, 1, COL_DIM);
+    textCentered(buf, 200, F_SMALL, COL_DIM);
   }
 }
 
 void drawTask() {
   char buf[32];
   const Task& t = taskSnap;
-  textCentered("TASK", 44, 2, COL_DIM);
+  textCentered("TASK", 58, F_TITLE, COL_DIM);
   // ring fills while holding; full ring right after a reset
   bool flash = taskResetAt && millis() - taskResetAt < 1000;
   if (holdProgress > 0.02f || flash)
     drawArc(120, 120, 108, 116, -90, -90 + 360 * (flash ? 1.0f : holdProgress), flash ? COL_GREEN : COL_AMBER);
   if (!t.running) {
-    textCentered("--", 76, 5, COL_DIM);
-    textCentered(tpap::clockReady() ? "hold to start" : "waiting for clock", 140, 2, COL_DIM);
+    textCentered("--", 112, F_NUM, COL_DIM);
+    textCentered(tpap::clockReady() ? "hold to start" : "waiting for clock", 146, F_TEXT, COL_DIM);
     return;
   }
   double wh = t.kwh * 1000;
   if (wh < 10)        snprintf(buf, sizeof(buf), "%.1f", wh);
   else if (wh < 1000) snprintf(buf, sizeof(buf), "%.0f", wh);
   else                snprintf(buf, sizeof(buf), "%.2f", t.kwh);
-  textCentered(buf, 72, 5, COL_TEXT);
-  textCentered(wh < 1000 ? "Wh" : "kWh", 116, 2, COL_DIM);
+  valueUnit(buf, F_NUM, COL_TEXT, wh < 1000 ? "Wh" : "kWh", 108);
 
   long secs = tpap::clockReady() ? (long)(time(nullptr) - t.start) : 0;
   if (secs < 0) secs = 0;
   if (secs < 3600) snprintf(buf, sizeof(buf), "%ldm %02lds", secs / 60, secs % 60);
   else             snprintf(buf, sizeof(buf), "%ldh %02ldm", secs / 3600, (secs / 60) % 60);
-  textCentered(buf, 140, 2, COL_TEXT);
+  textCentered(buf, 136, F_LINE, COL_TEXT);
   if (secs >= 10) {
     float avg = wh * 3600.0 / secs;
     snprintf(buf, sizeof(buf), "avg %.0f W", avg);
-    textCentered(buf, 160, 2, loadColor(avg / MAX_W));
+    textCentered(buf, 157, F_TEXT, loadColor(avg / MAX_W));
   }
   if (t.peakW > 0) {
     snprintf(buf, sizeof(buf), "max %.0f W", t.peakW);
-    textCentered(buf, 180, 2, loadColor(t.peakW / MAX_W));
+    textCentered(buf, 177, F_TEXT, loadColor(t.peakW / MAX_W));
   }
-  textCentered(flash ? "started" : "hold to reset", 202, 1, flash ? COL_GREEN : COL_DIM);
+  textCentered(flash ? "started" : "hold to reset", 199, F_SMALL, flash ? COL_GREEN : COL_DIM);
 }
 
 void drawMonth() {
@@ -459,18 +493,17 @@ void drawMonth() {
   time_t now = time(nullptr);
   struct tm lt;
   localtime_r(&now, &lt);
-  textCentered(tpap::clockReady() ? MONTHS[lt.tm_mon] : "MONTH", 44, 2, COL_DIM);
+  textCentered(tpap::clockReady() ? MONTHS[lt.tm_mon] : "MONTH", 58, F_TITLE, COL_DIM);
   float kwh;
   if (sumKwh(true, kwh)) snprintf(buf, sizeof(buf), "%.1f", kwh); else snprintf(buf, sizeof(buf), "--");
-  textCentered(buf, 70, 5, COL_TEXT);
-  textCentered("kWh", 114, 2, COL_DIM);
-  // per-plug breakdown: big text for up to 3 plugs, small for up to 6
+  valueUnit(buf, F_NUM, COL_TEXT, "kWh", 112);
+  // per-plug breakdown: regular text for up to 3 plugs, small for up to 5
   bool big = N_PLUGS <= 3;
-  int y = 140, step = big ? 22 : 12;
-  for (size_t i = 0; i < N_PLUGS && i < 6; i++, y += step) {
-    if (isnan(snap[i].monthKwh)) snprintf(buf, sizeof(buf), "%s --", PLUGS[i].name);
-    else snprintf(buf, sizeof(buf), "%s %.1f", PLUGS[i].name, snap[i].monthKwh);
-    textCentered(buf, y, big ? 2 : 1, COL_TEXT);
+  int y = big ? 142 : 136, step = big ? 21 : 14;
+  for (size_t i = 0; i < N_PLUGS && i < 5; i++, y += step) {
+    if (isnan(snap[i].monthKwh)) snprintf(buf, sizeof(buf), "%s  --", PLUGS[i].name);
+    else snprintf(buf, sizeof(buf), "%s  %.1f kWh", PLUGS[i].name, snap[i].monthKwh);
+    textCentered(buf, y, big ? F_TEXT : F_SMALL, COL_TEXT);
   }
 }
 
@@ -505,28 +538,27 @@ void drawUI() {
 
   char buf[32];
   if (WiFi.status() != WL_CONNECTED) {
-    textCentered("WiFi...", 104, 3, COL_DIM);
+    textCentered("WiFi...", 126, F_LINE, COL_DIM);
     gfx->flush();
     return;
   }
 
-  textCentered("TOTAL", 50, 2, COL_DIM);
-  if (shownW >= 10000) snprintf(buf, sizeof(buf), "%.1fk", shownW / 1000);
-  else                 snprintf(buf, sizeof(buf), "%.0f", shownW);
-  textCentered(buf, 76, 6, COL_TEXT);            // big number, 48 px tall
+  textCentered("TOTAL", 64, F_TITLE, COL_DIM);
+  snprintf(buf, sizeof(buf), "%.0f", shownW);
+  valueUnit(buf, F_BIG, COL_TEXT, "W", 120);    // 46 px digits
   float left = MAX_W - total;
-  if (left >= 0) snprintf(buf, sizeof(buf), "W  -  %.0f W left", left);
-  else           snprintf(buf, sizeof(buf), "W  -  %.0f W over", -left);
-  textCentered(buf, 130, 1, left >= 0 ? COL_DIM : COL_RED);
+  if (left >= 0) snprintf(buf, sizeof(buf), "%.0f W left", left);
+  else           snprintf(buf, sizeof(buf), "%.0f W over", -left);
+  textCentered(buf, 144, F_TEXT, left >= 0 ? COL_DIM : COL_RED);
 
   // cycling plug line
   if (millis() - lastCycle > CYCLE_MS) { lastCycle = millis(); cycleIdx = (cycleIdx + 1) % N_PLUGS; }
   const Reading& p = snap[cycleIdx];
-  textCentered(PLUGS[cycleIdx].name, 150, 2, COL_TEXT);
+  textCentered(PLUGS[cycleIdx].name, 165, F_SMALL, COL_DIM);
   if (p.online)       snprintf(buf, sizeof(buf), "%.1f W", p.w);
   else if (p.seen)    snprintf(buf, sizeof(buf), "offline");
   else                snprintf(buf, sizeof(buf), "...");
-  textCentered(buf, 172, 2, p.online ? loadColor(p.w / MAX_W) : COL_RED);
+  textCentered(buf, 186, F_LINE, p.online ? loadColor(p.w / MAX_W) : COL_RED);
 
   // status dots
   int spacing = 12, x0 = 120 - (int)(N_PLUGS - 1) * spacing / 2;
