@@ -266,6 +266,29 @@ static bool parseEnergy(const String& reply, bool smart, KasaEnergy& e, String& 
   return true;
 }
 
+struct KasaUsage { float todayKwh = NAN, monthKwh = NAN; };
+
+static const char* SMART_USAGE_CMD = "{\"method\":\"get_energy_usage\"}";
+
+// Today's and this month's energy from the plug's own counters (SMART plugs only; call after
+// kasaReadEnergy() has picked the protocol)
+static bool kasaReadUsage(const char* ip, KasaConn& c, KasaUsage& u, String& err) {
+  if (!c.smart || (c.proto != KasaConn::TPAP && c.proto != KasaConn::KLAP)) {
+    err = "daily/monthly totals need a SMART plug";
+    return false;
+  }
+  String reply;
+  bool ok = c.proto == KasaConn::TPAP ? tpap::query(ip, KASA_USER, KASA_PASS, c.tpap, SMART_USAGE_CMD, reply, err)
+                                      : klapQuery(ip, c.klap, SMART_USAGE_CMD, reply, err);
+  if (!ok) return false;
+  JsonDocument d;
+  if (deserializeJson(d, reply) || (d["error_code"] | -1) != 0) { err = "no usage data: " + reply.substring(0, 120); return false; }
+  JsonObject r = d["result"];
+  u.todayKwh = r["today_energy"].is<float>() ? r["today_energy"].as<float>() / 1000.0f : NAN;   // Wh
+  u.monthKwh = r["month_energy"].is<float>() ? r["month_energy"].as<float>() / 1000.0f : NAN;
+  return true;
+}
+
 // Read the plug's live power. The protocol is picked on first contact and kept:
 // legacy (TCP 9999) -> if refused, TPAP when the plug prefers it, otherwise KLAP.
 static bool kasaReadEnergy(const char* ip, KasaConn& c, KasaEnergy& e, String& err) {
