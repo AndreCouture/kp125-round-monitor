@@ -4,8 +4,8 @@ Handoff from a claude.ai chat. Read this file, `README.md` and `docs/hardware.md
 
 ## What we're building
 A small desk gadget that shows live electricity use from TP-Link Kasa **KP125** smart plugs:
-- **Board:** Waveshare **ESP32-S3-LCD-1.28** (round 240×240 GC9A01 IPS, ESP32-S3R2, 16 MB flash, 2 MB PSRAM, CH343 USB-serial, QMI8658 IMU). Photo: `docs/photos/board.jpeg`. The owner believes it is the **non-touch** version — confirm (touch version has a CST816S and different LCD_RST/backlight pins, see `docs/hardware.md`).
-- **Data:** polls each KP125 over the LAN using the legacy Kasa protocol (TCP 9999, XOR "autokey" 171, 4-byte big-endian length prefix), command `{"emeter":{"get_realtime":{}}}`, fields `power_mw`, `voltage_mv`, `current_ma`, `total_wh`.
+- **Board:** Waveshare **ESP32-S3-Touch-LCD-1.28** (round 240×240 GC9A01 IPS, ESP32-S3R2, 16 MB flash, 2 MB PSRAM, CH343 USB-serial, CST816S touch, QMI8658 IMU). Photo: `docs/photos/board.jpeg`. Confirmed on hardware: LCD_RST **14**, backlight **GPIO2** (the non-touch pins leave the screen black); see `docs/hardware.md`.
+- **Data:** polls each plug over the LAN. The owner's plugs are actually **KP125M** on firmware 1.4.1, which only speak **TPAP** (SPAKE2+); legacy (TCP 9999) and KLAP are implemented in `kasa.h` but rejected by these plugs. See `docs/hardware.md` for the probed protocol profile.
 - **Display:** arc gauge of total W vs `MAX_W`, big total, "W left" headroom, cycling per-plug line, online/offline dots.
 - **Enclosure:** 3D-printed tilted desk stand + press-fit back cap (OpenSCAD).
 
@@ -21,8 +21,9 @@ docs/photos/board.jpeg          photo of the board back
 ## Current status
 | Piece | State |
 |---|---|
-| `kp125_monitor.ino` | Written, **not compiled or run**. |
-| `kp125_round_display.ino` | Written, **not compiled or run**. Uses Arduino_GFX + ArduinoJson v7. |
+| `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + discovery; cannot read the owner's TPAP plugs yet. |
+| `kp125_round_display.ino` | Compiles and runs; panel verified with touch-board pins. `DEMO_MODE` for layout checks. Layout/flicker review with the owner pending. |
+| TPAP transport | Working locally via python-kasa PR #1592 branch; ESP32 port in progress. |
 | `display_stand.scad` | Written, **never rendered** (no OpenSCAD in the chat sandbox). Board dimensions are **estimates**. |
 
 ## Tasks, in order

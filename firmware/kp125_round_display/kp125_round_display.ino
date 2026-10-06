@@ -1,4 +1,4 @@
-// Live KP125 power monitor on the Waveshare ESP32-S3-LCD-1.28 (round 240x240 GC9A01)
+// Live KP125 power monitor on the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 GC9A01)
 //
 // Screen: arc gauge of total power vs MAX_W, big total in the middle,
 // "W left" headroom, then each plug cycles through with its own reading.
@@ -21,6 +21,13 @@
 #else
 #error "Copy secrets.example.h to secrets.h and fill in your Wi-Fi and plug IPs"
 #endif
+#include "kasa.h"   // after secrets.h: uses KASA_USER / KASA_PASS
+
+// 1 = fake readings, to check the screen layout without reachable plugs.
+// Build with --build-property "compiler.cpp.extra_flags=-DDEMO_MODE=1" to avoid editing.
+#ifndef DEMO_MODE
+#define DEMO_MODE 0
+#endif
 
 // ---------------- your settings ----------------
 struct PlugCfg { const char* name; const char* ip; };
@@ -32,13 +39,13 @@ const uint32_t POLL_MS      = 3000;   // plug polling interval
 const uint32_t CYCLE_MS     = 3000;   // how long each plug is shown
 // ------------------------------------------------
 
-// Waveshare ESP32-S3-LCD-1.28 pins (non-touch version)
+// Waveshare ESP32-S3-Touch-LCD-1.28 pins (owner's board; RST/BL differ from the non-touch model)
 #define LCD_DC   8
 #define LCD_CS   9
 #define LCD_SCK  10
 #define LCD_MOSI 11
-#define LCD_RST  12
-#define LCD_BL   40
+#define LCD_RST  14
+#define LCD_BL   2
 
 Arduino_DataBus* bus   = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI, GFX_NOT_DEFINED);
 Arduino_GFX*     panel = new Arduino_GC9A01(bus, LCD_RST, 0 /*rotation*/, true /*IPS*/);
@@ -59,49 +66,17 @@ const uint16_t COL_RED   = rgb(240, 70, 60);
 struct Reading { float w = 0, v = 0, a = 0, kwh = 0; bool online = false; bool seen = false; };
 Reading readings[N_PLUGS];
 portMUX_TYPE readMux = portMUX_INITIALIZER_UNLOCKED;
+KasaConn conns[N_PLUGS];   // protocol + KLAP session per plug; poll task only
 // Explicit prototype: stops the Arduino preprocessor emitting one above struct Reading
-bool readPlug(const char* ip, Reading& r);
+bool readPlug(const char* ip, KasaConn& conn, Reading& r, String& err);
 
-// ---------- Kasa local protocol (TCP 9999, XOR autokey 171) ----------
-static void kasaEncrypt(const uint8_t* in, uint8_t* out, size_t n) {
-  uint8_t key = 171;
-  for (size_t i = 0; i < n; i++) { out[i] = key ^ in[i]; key = out[i]; }
-}
-static void kasaDecrypt(uint8_t* buf, size_t n) {
-  uint8_t key = 171;
-  for (size_t i = 0; i < n; i++) { uint8_t c = buf[i]; buf[i] = key ^ c; key = c; }
-}
-
-bool kasaQuery(const char* ip, const char* cmd, String& reply) {
-  WiFiClient c;
-  c.setTimeout(3000);
-  if (!c.connect(ip, 9999, 3000)) return false;
-  size_t n = strlen(cmd);
-  std::vector<uint8_t> out(4 + n);
-  out[0] = n >> 24; out[1] = n >> 16; out[2] = n >> 8; out[3] = n;
-  kasaEncrypt((const uint8_t*)cmd, out.data() + 4, n);
-  c.write(out.data(), out.size());
-
-  uint8_t hdr[4];
-  if (c.readBytes(hdr, 4) != 4) return false;
-  uint32_t len = ((uint32_t)hdr[0] << 24) | ((uint32_t)hdr[1] << 16) | ((uint32_t)hdr[2] << 8) | hdr[3];
-  if (len == 0 || len > 8192) return false;
-  std::vector<uint8_t> in(len + 1);
-  if (c.readBytes(in.data(), len) != len) return false;
-  c.stop();
-  kasaDecrypt(in.data(), len);
-  in[len] = 0;
-  reply = String((const char*)in.data());
-  return true;
-}
-
-bool readPlug(const char* ip, Reading& r) {
+bool readPlug(const char* ip, KasaConn& conn, Reading& r, String& err) {
   String reply;
-  if (!kasaQuery(ip, "{\"emeter\":{\"get_realtime\":{}}}", reply)) return false;
+  if (!kasaRequest(ip, conn, "{\"emeter\":{\"get_realtime\":{}}}", reply, err)) return false;
   JsonDocument doc;
-  if (deserializeJson(doc, reply)) return false;
+  if (deserializeJson(doc, reply)) { err = "reply is not JSON"; return false; }
   JsonObject rt = doc["emeter"]["get_realtime"];
-  if (rt.isNull() || rt["err_code"].as<int>() != 0) return false;
+  if (rt.isNull() || rt["err_code"].as<int>() != 0) { err = "no emeter data: " + reply.substring(0, 120); return false; }
   r.w   = rt["power_mw"].as<float>()   / 1000.0f;
   r.v   = rt["voltage_mv"].as<float>() / 1000.0f;
   r.a   = rt["current_ma"].as<float>() / 1000.0f;
@@ -122,13 +97,24 @@ void pollTask(void*) {
     connectWiFi();
     for (size_t i = 0; i < N_PLUGS; i++) {
       Reading r;
-      r.online = (WiFi.status() == WL_CONNECTED) && readPlug(PLUGS[i].ip, r);
+      String err = "WiFi down";
+#if DEMO_MODE
+      // Fake readings for checking the layout: slow swing through all gauge colours,
+      // last plug stays offline so the red dot/"offline" path shows too
+      float t = millis() / 1000.0f;
+      r.online = (i + 1 < N_PLUGS) || N_PLUGS == 1;
+      r.w = max(0.0f, MAX_W / N_PLUGS * (0.5f + 0.5f * sinf(t / 8 + i)));
+      r.v = 120; r.a = r.w / 120; r.kwh = 12.3f;
+#else
+      r.online = (WiFi.status() == WL_CONNECTED) && readPlug(PLUGS[i].ip, conns[i], r, err);
+#endif
       r.seen = true;
       portENTER_CRITICAL(&readMux);
       if (r.online) readings[i] = r;
       else { readings[i].online = false; readings[i].seen = true; }
       portEXIT_CRITICAL(&readMux);
-      Serial.printf("%-8s %s %.1f W\n", PLUGS[i].name, r.online ? "ok " : "-- ", r.w);
+      if (r.online) Serial.printf("%-8s ok  %.1f W\n", PLUGS[i].name, r.w);
+      else          Serial.printf("%-8s --  %s\n", PLUGS[i].name, err.c_str());
     }
     vTaskDelay(pdMS_TO_TICKS(POLL_MS));
   }

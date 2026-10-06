@@ -1,10 +1,12 @@
 # Hardware notes
 
-## Waveshare ESP32-S3-LCD-1.28 (non-touch)
+## Waveshare ESP32-S3-Touch-LCD-1.28 (the owner's board)
+Confirmed 2026-10-05 on the hardware: the panel stays black with the non-touch pins (RST 12, BL 40) and works with the pins below, which match the owner's earlier working project `~/Projects/ESP32-S3-Touch-LCD-1.28-Speedometer` (`include/config.h`). The board has a 12-pin connector next to BOOT/RESET (`docs/photos/board.jpeg`), so the connector is **not** a reliable way to tell the variants apart.
+
 - SoC ESP32-S3R2 (2 MB PSRAM), 16 MB external flash, CH343P USB-UART (UART0 on GPIO43/44), auto-download circuit.
-- Display: GC9A01A, 240×240 round IPS, 4-wire SPI up to 80 MHz, active area Ø32.4 mm.
-- IMU: QMI8658 on I2C.
-- Battery: MX1.25 2-pin 3.7 V Li-ion, ETA6096 charger; battery sense on GPIO1 through a 200k/100k divider (V = raw × 3.3 / 4096 × 3).
+- Display: GC9A01A, 240×240 round IPS, 4-wire SPI up to 80 MHz, colour inversion on, active area Ø32.4 mm.
+- Touch: CST816S on I2C (addr 0x15). IMU: QMI8658 on the same I2C bus (0x6B).
+- Battery: MX1.25 2-pin 3.7 V Li-ion; battery sense on GPIO1.
 
 | GPIO | Function |
 |---|---|
@@ -12,15 +14,16 @@
 | 9  | LCD_CS |
 | 10 | LCD_CLK |
 | 11 | LCD_MOSI |
-| 12 | LCD_RST |
-| 40 | LCD_BL (backlight, PWM-able) |
-| 6 / 7 | I2C SDA / SCL (IMU) |
-| 5  | TP_INT (touch version) |
-| 47 / 48 | IMU INT1 / INT2 |
+| 12 | LCD_MISO (unused) |
+| 14 | LCD_RST |
+| 2  | LCD_BL (backlight, PWM-able) |
+| 6 / 7 | I2C SDA / SCL (touch + IMU) |
+| 5 / 13 | Touch INT / RST |
+| 4 / 3 | IMU INT1 / INT2 |
 | 1  | Battery ADC |
 | 0  | BOOT |
 
-**Touch version (ESP32-S3-Touch-LCD-1.28)** differs: CST816S touch on I2C, backlight on **GPIO2**, and a 6-GPIO SH1.0 connector instead of the 1.27 mm header. Check its wiki for LCD_RST before using.
+**Non-touch ESP32-S3-LCD-1.28** (not this board) uses LCD_RST **12** and LCD_BL **40**, IMU INT on 47/48.
 
 Sources: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.28 , https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.28 (schematic + 3D model zip linked from the wiki — useful for exact stand dimensions).
 
