@@ -71,6 +71,11 @@ const uint32_t HISTORY_RETRY_MS = 120000;     // retry sooner after a failed his
 const uint32_t PAGE_TIMEOUT_MS = 20000;   // back to the gauge after this long without a touch
 // Local time zone (POSIX TZ) for the daily peak/low reset at midnight; plugs report America/Toronto
 const char*    TZ_INFO      = "EST5EDT,M3.2.0,M11.1.0";
+// Time servers (SNTP asks both). The clock is required: TPAP checks the plugs' certificate dates and
+// refuses to connect until it is set. To run without internet, put a LAN NTP server first (e.g. your
+// router's IP, "192.168.103.1") and keep a public one second as a fallback.
+const char*    NTP_SERVER1  = "pool.ntp.org";
+const char*    NTP_SERVER2  = "time.google.com";
 // ------------------------------------------------
 
 // Waveshare ESP32-S3-Touch-LCD-1.28 pins (owner's board; RST/BL differ from the non-touch model)
@@ -206,7 +211,7 @@ void connectWiFi() {
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) delay(250);
   // TPAP checks the plug's certificate dates (needs real time); TZ_INFO gives local midnight
   static bool sntp = false;
-  if (WiFi.status() == WL_CONNECTED && !sntp) { configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com"); sntp = true; }
+  if (WiFi.status() == WL_CONNECTED && !sntp) { configTzTime(TZ_INFO, NTP_SERVER1, NTP_SERVER2); sntp = true; }
 }
 
 // Fold one complete poll's total into today's peak/low; resets at local midnight

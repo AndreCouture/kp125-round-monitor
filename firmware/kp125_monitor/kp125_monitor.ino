@@ -53,6 +53,10 @@ const size_t N_PLUGS = 0;
 #endif
 
 const uint32_t POLL_MS = 5000;   // 2-10 s is plenty
+// Time servers (SNTP asks both); TPAP needs the time to check the plugs' certificates. To run
+// without internet, put a LAN NTP server first (e.g. your router's IP) and keep a public one second.
+const char* NTP_SERVER1 = "pool.ntp.org";
+const char* NTP_SERVER2 = "time.google.com";
 // -----------------------------------
 
 String lastErr;   // why the last readPlug() failed, for the serial log
@@ -119,7 +123,7 @@ void connectWiFi() {
   Serial.println(WiFi.status() == WL_CONNECTED ? " ok " + WiFi.localIP().toString() : " failed");
   // TPAP checks the plug's certificate dates, so it needs real time (UTC is fine)
   static bool sntp = false;
-  if (WiFi.status() == WL_CONNECTED && !sntp) { configTime(0, 0, "pool.ntp.org", "time.google.com"); sntp = true; }
+  if (WiFi.status() == WL_CONNECTED && !sntp) { configTime(0, 0, NTP_SERVER1, NTP_SERVER2); sntp = true; }
 }
 
 #if USE_OLED

@@ -70,6 +70,7 @@ They are at the top of `firmware/kp125_round_display/kp125_round_display.ino`; c
 | `RATE_PER_KWH` | `0.11142` | Your electricity rate per kWh for the cost estimate; `0` hides cost. Energy only: no delivery, fixed charges or tax. |
 | `CURRENCY` | `"$"` | Shown before costs. |
 | `TZ_INFO` | `"EST5EDT,M3.2.0,M11.1.0"` | POSIX time zone; used for midnight resets, night dimming and daily history. |
+| `NTP_SERVER1` / `NTP_SERVER2` | `"pool.ntp.org"` / `"time.google.com"` | Time servers (both are asked). The time is required before the plugs' certificates can be checked. To run without internet, set the first to a LAN NTP server such as your router's IP and keep a public one second as a fallback. Also in `kp125_monitor.ino`. |
 | `NIGHT_FROM` / `NIGHT_TO` | `22` / `7` | Night dimming window in local hours (may wrap midnight; equal values = never dim). Can also be set at build time, e.g. `-DNIGHT_FROM=12 -DNIGHT_TO=14`, to test during the day. |
 | `DAY_BRIGHTNESS` / `NIGHT_BRIGHTNESS` | `255` / `12` | Backlight levels 0–255; `0` turns the screen off at night. |
 | `WAKE_MS` | `30000` | How long a touch keeps the screen bright at night. |
@@ -121,7 +122,7 @@ At night the screen dims; the first touch only wakes it. It stays bright if tota
 | Symptom | Cause / fix |
 | :--- | :--- |
 | Screen stays black | Non-touch board. This firmware is for the touch version (backlight GPIO2, reset GPIO14). |
-| `TPAP waiting for NTP time` | The board can't reach an NTP server yet; it needs internet access for the time. |
+| `TPAP waiting for NTP time` | The board can't reach `NTP_SERVER1` or `NTP_SERVER2` yet. Check internet access, or point `NTP_SERVER1` at a LAN NTP server (e.g. your router). |
 | `plug confirmation mismatch (wrong KASA_PASS?)` | `KASA_USER` / `KASA_PASS` don't match the TP-Link account the plugs belong to. |
 | `backing off after N failed login(s)` | Repeated login failures: the firmware waits 3 s, doubling to 5 min, between attempts so the plug isn't flooded. |
 | `port 9999 timed out` | Wrong IP, plug offline, or the display is on a network that can't reach the plug. |
