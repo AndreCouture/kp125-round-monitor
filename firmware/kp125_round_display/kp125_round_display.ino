@@ -3,9 +3,9 @@
 
 // Live KP125 power monitor on the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 GC9A01)
 //
-// Screen: arc gauge of total power vs MAX_W, big total in the middle,
-// "W left" headroom, then the selected plug's reading (swipe up/down to change plug).
-// Dots at the bottom show which plugs are online.
+// Screen: arc gauge of live power vs MAX_W, big value in the middle: all plugs summed ("LIVE - ALL"),
+// with "W left" headroom, or one plug with its volts and amps (swipe up/down: ALL / each plug).
+// The vertical dots on the right show ALL then each plug, green online / red offline; the larger one is shown.
 // Tap or swipe right for the next page, swipe left for the previous one:
 //   TASK  - task meters (all plugs, and one per plug: swipe up/down to pick); hold HOLD_MS to
 //           reset the shown one. Each counts energy, time, avg and max, and survives reboots.
@@ -558,7 +558,7 @@ size_t taskSel = 0;                             // meter shown on TASK: 0 = all 
 size_t histSel = 0;                             // history shown: 0 = all plugs, 1 + i = plug i
 DayHistory histSnap[N_PLUGS];
 float shownW = 0;                               // animated value
-size_t cycleIdx = 0;                            // plug shown on the gauge page (swipe up/down)
+size_t gaugeSel = 0;                            // gauge page: 0 = all plugs, 1 + i = plug i (swipe up/down)
 Reading snap[N_PLUGS];                          // UI-side copies, refreshed every frame
 DayStats statsSnap;
 
@@ -623,7 +623,7 @@ void handleTouch() {
   int dx = xl - x0, dy = yl - y0;  if (abs(dx) > 50 && abs(dx) > abs(dy)) page = (page + (dx > 0 ? 1 : N_PAGES - 1)) % N_PAGES;
   else if (abs(dy) > 50 && abs(dy) > abs(dx)) {   // finger moving up = next
     if (N_PLUGS < 2) return;
-    if (page == PAGE_GAUGE)     cycleIdx = (cycleIdx + (dy < 0 ? 1 : N_PLUGS - 1)) % N_PLUGS;
+    if (page == PAGE_GAUGE)     gaugeSel = (gaugeSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS;
     else if (page == PAGE_TASK) { taskSel = (taskSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS; taskResetAt = 0; }
     else if (page == PAGE_HISTORY) histSel = (histSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS;
     else return;
@@ -632,10 +632,27 @@ void handleTouch() {
   lastTouch = millis();
 }
 
+// Navigation hints: the page row at the bottom (swipe sideways) has arrows at its ends; pages with
+// a swipe up/down choice show a vertical column of dots on the right with arrows above and below.
+const uint16_t COL_HINT = rgb(90, 90, 100);
+
 void drawPageDots() {
-  int x0 = 120 - (N_PAGES - 1) * 12 / 2;
+  int x0 = 120 - (N_PAGES - 1) * 12 / 2, x1 = x0 + (N_PAGES - 1) * 12;
   for (int i = 0; i < N_PAGES; i++)
     gfx->fillCircle(x0 + i * 12, 224, 2, i == page ? COL_TEXT : COL_TRACK);
+  gfx->fillTriangle(x0 - 10, 224, x0 - 6, 221, x0 - 6, 227, COL_HINT);
+  gfx->fillTriangle(x1 + 10, 224, x1 + 6, 221, x1 + 6, 227, COL_HINT);
+}
+
+// One dot per choice, top to bottom; swiping up moves the selection down the column.
+// colors == nullptr: selected white, others dark; otherwise each dot's own colour (plug status).
+void drawChoiceDots(size_t n, size_t sel, const uint16_t* colors = nullptr) {
+  if (n < 2) return;                              // nothing to swipe between
+  const int x = 212, sp = 12, y0 = 120 - (int)(n - 1) * sp / 2, y1 = y0 + (int)(n - 1) * sp;
+  for (size_t i = 0; i < n; i++)
+    gfx->fillCircle(x, y0 + i * sp, i == sel ? 4 : 2, colors ? colors[i] : (i == sel ? COL_TEXT : COL_TRACK));
+  gfx->fillTriangle(x, y0 - 12, x - 3, y0 - 8, x + 3, y0 - 8, COL_HINT);
+  gfx->fillTriangle(x, y1 + 12, x - 3, y1 + 8, x + 3, y1 + 8, COL_HINT);
 }
 
 // "14:32" in local time
@@ -911,7 +928,10 @@ void drawUI() {
   for (size_t i = 0; i < N_PLUGS; i++) if (snap[i].online) { total += snap[i].w; online++; }
 
   updateBrightness(total);
-  shownW += (total - shownW) * 0.15f;           // smooth needle (keeps animating on other pages)
+  // The gauge shows the total, or one plug's power when a plug is selected (0 while it's offline)
+  const Reading* sel = gaugeSel ? &snap[gaugeSel - 1] : nullptr;
+  float target = !sel ? total : (sel->online ? sel->w : 0);
+  shownW += (target - shownW) * 0.15f;          // smooth needle (keeps animating on other pages)
   float frac = constrain(shownW / MAX_W, 0.0f, 1.0f);
   uint16_t col = loadColor(frac);
 
@@ -922,6 +942,8 @@ void drawUI() {
     else if (page == PAGE_MONTH) drawMonth();
     else if (page == PAGE_HISTORY) drawHistory();
     else drawClock(total);
+    if (page == PAGE_TASK) drawChoiceDots(N_TASKS, taskSel);
+    else if (page == PAGE_HISTORY) drawChoiceDots(N_TASKS, histSel);
     drawPageDots();
     gfx->pushSprite(0, 0);
     return;
@@ -939,33 +961,45 @@ void drawUI() {
   }
 
   drawBattery();
-  textCentered("TOTAL", 64, F_TITLE, COL_DIM);
-  snprintf(buf, sizeof(buf), "%.0f", shownW);
-  valueUnit(buf, F_BIG, COL_TEXT, "W", 120);    // 46 px digits
-  float left = MAX_W - total;
-  if (left >= 0) snprintf(buf, sizeof(buf), "%.0f W left", left);
-  else           snprintf(buf, sizeof(buf), "%.0f W over", -left);
-  textCentered(buf, 144, F_TEXT, left >= 0 ? COL_DIM : COL_RED);
+  // title names what the big number is: "LIVE - ALL" (all plugs summed) or "LIVE - <PLUG>"
+  snprintf(buf, sizeof(buf), "LIVE - %s", sel ? PLUGS[gaugeSel - 1].name : "ALL");
+  for (char* c = buf; *c; c++) *c = toupper((unsigned char)*c);
+  textCentered(buf, 64, F_TITLE, COL_DIM);
 
-  // cycling plug line
-  // selected plug line
-  const Reading& p = snap[cycleIdx];
-  textCentered(PLUGS[cycleIdx].name, 158, F_SMALL, COL_DIM);
-  if (p.online)       snprintf(buf, sizeof(buf), "%.1f W", p.w);
-  else if (p.seen)    snprintf(buf, sizeof(buf), "offline");
-  else                snprintf(buf, sizeof(buf), "...");
-  textCentered(buf, 178, F_LINE, p.online ? loadColor(p.w / MAX_W) : COL_RED);
-  if (p.online) {
-    snprintf(buf, sizeof(buf), "%.1f V   %.2f A", p.v, p.a);
-    textCentered(buf, 194, F_SMALL, COL_DIM);
+  if (sel && !sel->online) {                    // selected plug not answering (yet)
+    textCentered("--", 120, F_BIG, COL_DIM);
+    textCentered(sel->seen ? "offline" : "...", 146, F_LINE, sel->seen ? COL_RED : COL_DIM);
+  } else {
+    snprintf(buf, sizeof(buf), "%.0f", shownW);
+    valueUnit(buf, F_BIG, COL_TEXT, "W", 120);  // 46 px digits
+    if (!sel) {                                 // headroom against the circuit limit
+      float left = MAX_W - total;
+      if (left >= 0) snprintf(buf, sizeof(buf), "%.0f W left of %.0f", left, MAX_W);
+      else           snprintf(buf, sizeof(buf), "%.0f W over %.0f", -left, MAX_W);
+      textCentered(buf, 144, F_TEXT, left >= 0 ? COL_DIM : COL_RED);
+    } else {
+      snprintf(buf, sizeof(buf), "%.1f V   %.2f A", sel->v, sel->a);
+      textCentered(buf, 144, F_TEXT, COL_DIM);
+    }
+  }
+  if (!sel) {
+    snprintf(buf, sizeof(buf), "%d of %u plugs online", online, (unsigned)N_PLUGS);
+    textCentered(buf, 170, F_SMALL, online == (int)N_PLUGS ? COL_DIM : COL_RED);
+  } else {
+    snprintf(buf, sizeof(buf), "of %.0f W total", total);
+    textCentered(buf, 170, F_SMALL, COL_DIM);
   }
 
-  // status dots
-  int spacing = 12, x0 = 120 - (int)(N_PLUGS - 1) * spacing / 2;
+  // choice dots: ALL first (green when every plug answers), then each plug's status
+  uint16_t dc[N_TASKS];
+  bool anySeen = false, allOk = true;
   for (size_t i = 0; i < N_PLUGS; i++) {
-    uint16_t dc = !snap[i].seen ? COL_TRACK : (snap[i].online ? COL_GREEN : COL_RED);
-    gfx->fillCircle(x0 + i * spacing, 208, i == cycleIdx ? 4 : 2, dc);
+    dc[i + 1] = !snap[i].seen ? COL_TRACK : (snap[i].online ? COL_GREEN : COL_RED);
+    anySeen |= snap[i].seen;
+    allOk &= snap[i].online;
   }
+  dc[0] = !anySeen ? COL_TRACK : (allOk ? COL_GREEN : COL_RED);
+  drawChoiceDots(N_TASKS, gaugeSel, dc);
   drawPageDots();
 
   gfx->pushSprite(0, 0);
