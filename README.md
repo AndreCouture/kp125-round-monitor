@@ -24,6 +24,16 @@ A round touch display on your desk that shows live electricity use from TP-Link 
 
 See [docs/setup.md](docs/setup.md) for details and the list of supported plugs.
 
+### Don't want to build it yourself?
+
+12113775 Canada Inc. offers:
+
+- printed stands and caps (fixed or hinged),
+- individual parts,
+- a complete kit: the display flashed with this firmware, a printed stand and cap, and a cable.
+
+To ask for a quote, [open an issue](https://github.com/AndreCouture/kp125-round-monitor/issues/new?title=Print%20or%20kit%20request) saying what you need and which country it ships to. Please don't post your address or phone number there: issues are public.
+
 ## Quick start
 
 1. Set up the plugs in the Kasa app on 2.4 GHz Wi-Fi and give each a DHCP reservation.
