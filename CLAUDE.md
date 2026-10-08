@@ -26,7 +26,7 @@ docs/photos/board.jpeg          photo of the board back
 |---|---|
 | `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + TPAP + discovery; reads the owner's KP125M plugs. |
 | `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH/7 DAYS/CLOCK, cost estimate, night dimming, battery readout; `DEMO_MODE` for layout checks. |
-| TPAP transport | Ported to the ESP32 (`tpap.h`, see `docs/tpap-design.md`); self-test (known-answer + rejection paths) passes, reads both plugs live ("Bambu" .140, "Workbench" .252); back-off on failed logins. Reviewed by the local LLM gateway 2026-10-06 (see the design doc). |
+| TPAP transport | Ported to the ESP32 (`tpap.h`, see `docs/tpap-design.md`); self-test (known-answer + rejection paths) passes, reads the owner's KP125M plugs live; back-off on failed logins. Reviewed by the local LLM gateway 2026-10-06 (see the design doc). |
 | `display_stand.scad` | Renders clean (OpenSCAD 2026.06, Manifold). Fixed `stand` (printed, works) and a new hinged version (`hinge_head`/`hinge_base`/`hinge_pin`, click stops at 0/10/20/30 deg; collision-checked, not yet printed). Pocket follows the board's real outline (`clr` 0.4 from `fit_test_set`); cap with six extended crush ribs + four feet (printed, holds). Optional cable-tie anchors in both bases. |
 
 ## Tasks, in order

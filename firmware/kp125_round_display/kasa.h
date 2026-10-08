@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+// Portions derived from python-kasa (https://github.com/python-kasa/python-kasa),
+// GPL-3.0-or-later, Copyright (c) the python-kasa contributors.
+
 // Kasa local protocols: legacy (TCP 9999, XOR autokey), KLAP (HTTP 80, AES-128-CBC) and
 // TPAP (SPAKE2+, AES-128-CCM; see tpap.h). Identical copy in each sketch folder
 // (Arduino can't include across sketches) - keep in sync.

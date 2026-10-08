@@ -56,3 +56,13 @@ docs/                           guides and notes
 - TPAP protocol details come from [python-kasa pull request #1592](https://github.com/python-kasa/python-kasa/pull/1592).
 - Display fonts: [Inter](https://github.com/rsms/inter), SIL Open Font License 1.1 (see `fonts/Inter-LICENSE.txt`).
 - Board dimensions from Waveshare's ESP32-S3-Touch-LCD-1.28 drawing.
+
+## License
+
+Copyright (c) 2026 12113775 Canada Inc. Copies and modified versions must keep this notice and credit.
+
+- **Firmware, tools and git hook:** GPL-3.0-or-later (partly derived from python-kasa, also GPL-3.0-or-later).
+- **Stand design and documentation:** CC BY-NC-SA 4.0, so no commercial use without permission. To ask, open an issue.
+- **Fonts:** SIL Open Font License 1.1.
+
+See [`LICENSE`](LICENSE) for the details and `LICENSES/` for the full texts.

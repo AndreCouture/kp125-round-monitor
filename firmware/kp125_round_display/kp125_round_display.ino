@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+
 // Live KP125 power monitor on the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 GC9A01)
 //
 // Screen: arc gauge of total power vs MAX_W, big total in the middle,
@@ -73,7 +76,7 @@ const uint32_t PAGE_TIMEOUT_MS = 20000;   // back to the gauge after this long w
 const char*    TZ_INFO      = "EST5EDT,M3.2.0,M11.1.0";
 // Time servers (SNTP asks both). The clock is required: TPAP checks the plugs' certificate dates and
 // refuses to connect until it is set. To run without internet, put a LAN NTP server first (e.g. your
-// router's IP, "192.168.103.1") and keep a public one second as a fallback.
+// router's IP, e.g. "192.168.1.1") and keep a public one second as a fallback.
 const char*    NTP_SERVER1  = "pool.ntp.org";
 const char*    NTP_SERVER2  = "time.google.com";
 // ------------------------------------------------

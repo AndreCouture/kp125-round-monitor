@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+
 // Known-answer test for tpap.h; no network or real credentials needed.
 // Vectors computed by python-kasa's own TpapEncryptionSession (PR #1592 branch) with fixed
 // randomness, test password "kat-password", passwd_id 2, iterations 3000 and a compressed

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 12113775 Canada Inc.
 """Convert TTF fonts to anti-aliased VLW (Processing smooth font) C arrays for LovyanGFX.
 
 Usage:  uvx --with pillow python tools/make_vlw.py <dir with Inter-*.ttf> <output .h>

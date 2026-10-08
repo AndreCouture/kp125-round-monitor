@@ -54,7 +54,7 @@ Out of scope: TLS modes 1/2, NOC certificates, camera/robot passcode types, SHA-
 
 ## Tests
 - **Known-answer test** (`tpap_selftest.h`, built with `-DTPAP_SELFTEST=1`): fixed `x`, randoms, salt, test password and a compressed device share; vectors produced by python-kasa's own `TpapEncryptionSession`. Checks `L`, `user_confirm`, expected `dev_confirm`, `K`, session key, base nonce and one encrypted request byte-for-byte. Runs on the board with no network.
-- **Live** against the spare plug `192.168.103.252`, then `.140`.
+- **Live** against a spare KP125M first, then the plugs in use.
 
 - **Rejection paths** (same self-test, after SNTP): a one-byte-different confirmation fails `ctEqual`; a garbage `dac_ca` is rejected; a forged `dac_proof` on an otherwise valid chain (the self-signed root as its own chain) is rejected by the proof check specifically.
 

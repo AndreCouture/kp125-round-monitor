@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+// Portions derived from python-kasa (https://github.com/python-kasa/python-kasa),
+// GPL-3.0-or-later, Copyright (c) the python-kasa contributors.
+
 // TPAP client: TP-Link's SPAKE2+ local protocol, as spoken by KP125M plugs on firmware 1.4.x.
 // Design, scope and security decisions: docs/tpap-design.md. Reference implementation:
 // python-kasa PR #1592, kasa/transports/tpaptransport.py.

@@ -1,0 +1,27 @@
+KP125 round power monitor
+Copyright (c) 2026 12113775 Canada Inc.
+
+This project uses different licences for different parts. Each source file
+carries an SPDX-License-Identifier line naming its licence.
+
+firmware/, tools/, .githooks/
+  GNU General Public License v3.0 or later (GPL-3.0-or-later).
+  Full text: LICENSES/GPL-3.0-or-later.txt
+  Parts of firmware/*/kasa.h and firmware/*/tpap.h are derived from
+  python-kasa (https://github.com/python-kasa/python-kasa),
+  GPL-3.0-or-later, Copyright (c) the python-kasa contributors.
+
+stand/, docs/ (including photos), README.md, CLAUDE.md
+  Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+  (CC BY-NC-SA 4.0).
+  Full text: LICENSES/CC-BY-NC-SA-4.0.txt
+
+fonts/ (Inter) and the generated firmware/kp125_round_display/fonts_inter.h
+  SIL Open Font License 1.1. Full text: fonts/Inter-LICENSE.txt
+
+Anyone sharing a copy or a modified version must keep this copyright notice
+and credit 12113775 Canada Inc.
+
+For commercial use of the stand design or the documentation (for example,
+selling printed stands), ask for permission by opening an issue on the
+GitHub repository.

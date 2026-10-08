@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+
 // ESP32 energy monitor for TP-Link Kasa KP125 smart plugs
 // Polls each plug locally (legacy TCP 9999 or KLAP over HTTP, see kasa.h) and prints
 // power, voltage, current, total kWh.

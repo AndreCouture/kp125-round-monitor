@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-4.0
+// Copyright (c) 2026 12113775 Canada Inc. Non-commercial use only; credit required. See LICENSE.
 // Desk stand for the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 touch display)
 // Parts: "stand" (fixed tilt), or the hinged version "hinge_head" + "hinge_base" + 2x "hinge_pin"
 // (adjustable tilt with click stops), plus "cap" (press-fit back cover) for either.

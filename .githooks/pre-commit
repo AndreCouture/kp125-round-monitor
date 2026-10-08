@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 12113775 Canada Inc.
 """Refuse commits that would leak credentials. Enabled with: git config core.hooksPath .githooks
 
 Blocks a commit when the staged changes contain:

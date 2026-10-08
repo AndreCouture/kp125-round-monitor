@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 12113775 Canada Inc.
+
 // Copy this file to secrets.h (git-ignored) and fill in your values.
 #pragma once
 
