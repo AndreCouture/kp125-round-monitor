@@ -531,14 +531,18 @@ uint16_t loadColor(float frac) {
 }
 
 // ---------- touch (CST816S) ----------
-// Same register read as the owner's Speedometer project: 0x01 = gesture, fingers, X hi/lo, Y hi/lo
-bool touchRead(int16_t& x, int16_t& y) {
+// Same register read as the owner's Speedometer project: 0x01 = gesture, fingers, X hi/lo, Y hi/lo.
+// gesture gets the chip's own gesture ID whenever the read succeeds, even with no finger down
+// (1 up, 2 down, 3 left, 4 right = slide; 5 click; 0 none).
+bool touchRead(int16_t& x, int16_t& y, uint8_t& gesture) {
   uint8_t b[6];
+  gesture = 0;
   Wire.beginTransmission(TP_ADDR);
   Wire.write(0x01);
   if (Wire.endTransmission(false) != 0) return false;   // chip asleep (no finger) NACKs
   if (Wire.requestFrom((int)TP_ADDR, 6) != 6) return false;
   for (auto& v : b) v = Wire.read();
+  gesture = b[0];
   if (b[1] == 0 || b[1] == 0xFF) return false;
   x = ((b[2] & 0x0F) << 8) | b[3];
   y = ((b[4] & 0x0F) << 8) | b[5];
@@ -592,18 +596,26 @@ void updateBrightness(float total) {
 }
 
 // Tap or swipe right = next page; swipe left = previous; hold on TASK = reset the task meter;
-// swipe up/down on the gauge = next/previous plug, on TASK = next/previous meter
+// swipe up/down on the gauge = next/previous plug, on TASK = next/previous meter.
+// The gesture is decided only once the finger has been gone for RELEASE_MS, so a missed read in the
+// middle of a swipe doesn't end it early; and a touch the chip itself saw as a slide is never a tap.
+const uint32_t RELEASE_MS = 80;
+
 void handleTouch() {
-  static bool down = false, held = false, swallow = false;
+  static bool down = false, held = false, swallow = false, slid = false;
   static int16_t x0, y0, xl, yl;
-  static uint32_t t0;
+  static uint32_t t0, lastSeen;
   int16_t x, y;
+  uint8_t g;
   holdProgress = 0;
-  if (touchRead(x, y)) {
+  bool touching = touchRead(x, y, g);
+  if (down && g >= 1 && g <= 4) slid = true;
+  if (touching) {
     if (!down) {
-      down = true; held = false; x0 = x; y0 = y; t0 = millis();
+      down = true; held = false; slid = false; x0 = x; y0 = y; t0 = millis();   // first read: ID may be stale
       swallow = brightness < DAY_BRIGHTNESS / 2;   // screen is dimmed: this touch only wakes it
     }
+    lastSeen = millis();
     wakeScreen();
     if (swallow) return;
     xl = x; yl = y;
@@ -617,17 +629,23 @@ void handleTouch() {
     return;
   }
   if (!down) return;
+  if (millis() - lastSeen < RELEASE_MS) return;  // maybe just a missed read: keep the gesture going
   down = false;                                  // finger lifted: classify the gesture
   if (swallow) { swallow = false; return; }      // that touch woke the screen
   if (held) return;                              // that was a hold, not a tap
-  int dx = xl - x0, dy = yl - y0;  if (abs(dx) > 50 && abs(dx) > abs(dy)) page = (page + (dx > 0 ? 1 : N_PAGES - 1)) % N_PAGES;
-  else if (abs(dy) > 50 && abs(dy) > abs(dx)) {   // finger moving up = next
+  int dx = xl - x0, dy = yl - y0;
+  // Measured on this panel: taps move 0 px, while a quick flick can be over in 2-3 reads and only
+  // move 10-20 px. So: a tap moves at most TAP_PX, a swipe at least SWIPE_PX, anything between is
+  // ignored; and a touch the chip itself saw as a slide is never a tap.
+  const int TAP_PX = 8, SWIPE_PX = 15;
+  if (abs(dx) >= SWIPE_PX && abs(dx) > abs(dy)) page = (page + (dx > 0 ? 1 : N_PAGES - 1)) % N_PAGES;
+  else if (abs(dy) >= SWIPE_PX && abs(dy) > abs(dx)) {   // finger moving up = next
     if (N_PLUGS < 2) return;
     if (page == PAGE_GAUGE)     gaugeSel = (gaugeSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS;
     else if (page == PAGE_TASK) { taskSel = (taskSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS; taskResetAt = 0; }
     else if (page == PAGE_HISTORY) histSel = (histSel + (dy < 0 ? 1 : N_TASKS - 1)) % N_TASKS;
     else return;
-  } else if (abs(dx) < 25 && abs(dy) < 25 && millis() - t0 < 800) page = (page + 1) % N_PAGES;
+  } else if (!slid && abs(dx) <= TAP_PX && abs(dy) <= TAP_PX && lastSeen - t0 < 800) page = (page + 1) % N_PAGES;
   else return;
   lastTouch = millis();
 }
@@ -1040,5 +1058,5 @@ void loop() {
   handleTouch();
   updateBattery();
   drawUI();
-  delay(33);   // ~30 fps
+  for (int i = 0; i < 3; i++) { delay(11); handleTouch(); }   // ~30 fps; sample touch every ~10 ms
 }
