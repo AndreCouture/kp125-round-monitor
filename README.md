@@ -1,6 +1,6 @@
 # KP125 Round Power Monitor
 
-A round touch display on your desk that shows live electricity use from TP-Link Kasa smart plugs, read directly over your home network, in a 3D-printed stand.
+A round touch display on your desk that shows live electricity use from TP-Link Kasa smart plugs, read directly over your home network, in a 3D-printed stand: fixed, or hinged with click stops (0-30°), both using the same back cap.
 
 ## Features
 
@@ -17,8 +17,10 @@ A round touch display on your desk that shows live electricity use from TP-Link 
 |---|---|
 | Waveshare **ESP32-S3-Touch-LCD-1.28** (touch version) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1.28.htm) · [Amazon.com](https://www.amazon.com/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) · [Amazon.ca](https://www.amazon.ca/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) |
 | TP-Link Kasa **KP125M** smart plug(s) | [TP-Link](https://www.tp-link.com/us/home-networking/smart-plug/kp125m/) · [Amazon.com](https://www.amazon.com/s?k=Kasa+KP125M) · [Amazon.ca](https://www.amazon.ca/s?k=Kasa+KP125M) |
-| USB-C cable (straight plug) and 5 V USB power adapter | Any |
-| *Optional:* 3D printer and PLA for the stand | — |
+| USB-C data cable (straight plug) | [Amazon.com](https://www.amazon.com/s?k=USB-C+data+cable+short) · [Amazon.ca](https://www.amazon.ca/s?k=USB-C+data+cable+short) |
+| 5 V USB power adapter | [Amazon.com](https://www.amazon.com/s?k=5V+USB+wall+charger) · [Amazon.ca](https://www.amazon.ca/s?k=5V+USB+wall+charger) |
+| *Optional:* PLA filament for the stand | [Amazon.com](https://www.amazon.com/s?k=PLA+filament+1.75mm) · [Amazon.ca](https://www.amazon.ca/s?k=PLA+filament+1.75mm) |
+| *Optional:* 3.7 V Li-ion battery, MX1.25 2-pin (check polarity, see [setup](docs/setup.md#1-what-you-need)) | [Amazon.com](https://www.amazon.com/s?k=3.7V+lipo+battery+MX1.25+2pin) · [Amazon.ca](https://www.amazon.ca/s?k=3.7V+lipo+battery+MX1.25+2pin) |
 
 See [docs/setup.md](docs/setup.md) for details and the list of supported plugs.
 
@@ -29,7 +31,7 @@ See [docs/setup.md](docs/setup.md) for details and the list of supported plugs.
 3. In `firmware/kp125_round_display`, copy `secrets.example.h` to `secrets.h` and fill in Wi-Fi, your TP-Link account and the plug IPs.
 4. Set `MAX_W` and `RATE_PER_KWH` at the top of `kp125_round_display.ino`.
 5. Flash it with FQBN `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled`.
-6. Print the stand from `stand/display_stand.scad` (`fit_test` first).
+6. Print a stand from `stand/display_stand.scad`: the fixed `stand`, or the hinged `hinge_head` + `hinge_base` + `hinge_pin`, plus the shared `cap` (`fit_test_set` first).
 7. After cloning, run `git config core.hooksPath .githooks` so credentials can't be committed.
 
 ## Documentation

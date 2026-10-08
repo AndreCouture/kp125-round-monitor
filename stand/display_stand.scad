@@ -1,5 +1,6 @@
 // Desk stand for the Waveshare ESP32-S3-Touch-LCD-1.28 (round 240x240 touch display)
-// Parts: "stand" (tilted holder + pedestal + base) and "cap" (press-fit back cover).
+// Parts: "stand" (fixed tilt), or the hinged version "hinge_head" + "hinge_base" + 2x "hinge_pin"
+// (adjustable tilt with click stops), plus "cap" (press-fit back cover) for either.
 // Open in OpenSCAD, set PART, F6 to render, F7 to export STL.
 // All dimensions in mm.
 //
@@ -7,7 +8,8 @@
 // dimension drawing / DXF for this board (wiki: ESP32-S3-Touch-LCD-1.28.zip), not calipers.
 // Print PART="fit_test" (a few-minute ring) before printing the full stand.
 
-PART = "both";       // "stand", "cap", "fit_test", "fit_test_set" (clr 0.4/0.5/0.6 = 1/2/3 notches), or "both" (assembled preview)
+PART = "both";       // "stand", "cap", "hinge_head", "hinge_base", "hinge_pin", "hinge_both" (preview),
+                     // "fit_test", "fit_test_set" (clr 0.4/0.5/0.6 = 1/2/3 notches), or "both" (fixed-stand preview)
 
 // ---------- board (from Waveshare's drawing; check with calipers if a print doesn't fit) ----------
 board_d       = 38.51; // lens OD, the widest round part (drawing: 38.51 +/-0.05)
@@ -45,6 +47,37 @@ base_w   = 70;
 base_d   = 58;
 base_t   = 4;
 hdr_notch= 14;         // notch in the cap for the 12-pin cable at the top (0 = none)
+
+// ---------- cable-tie anchors in the base (optional) ----------
+// Two slots through the base on either side of the cable, joined by a groove underneath so the
+// tie sits flush and the base stays flat: thread the tie down one slot, up the other, round the cable.
+tie_anchors  = true;
+tie_slot     = [4.5, 2.0];   // slot length along the cable x width; fits ties up to ~4 mm wide
+tie_span     = 11;           // slot-to-slot distance across the cable
+tie_groove   = 1.5;          // depth of the groove under the base
+
+// ---------- hinged stand (PART "hinge_head", "hinge_base", "hinge_pin", "hinge_both") ----------
+// The head (display ring + neck + two side ears) pivots between two cheeks on the base and clicks
+// into hinge_tilts: a bump on each cheek drops into one of the dimples on the ear.
+hinge_tilts  = [0, 10, 20, 30];  // click-stop angles of backward tilt; keep them >= 10 deg apart
+hinge_show   = 15;           // tilt shown in the "hinge_both" preview
+pivot_h      = 34;           // pivot height above the desk (leaves ~18 mm for the cable to bend)
+head_drop    = 40;           // ring centre above the pivot
+ear_t        = 4;            // ear (neck side wall) thickness
+ear_r        = 12;           // ear disc radius around the pivot
+cheek_t      = 4;            // cheek thickness
+cheek_gap    = 0.2;          // ear-to-cheek gap
+pin_d        = 4;            // pivot pin diameter
+pin_fit_cheek= 0.2;          // pin hole oversize in the cheek (snug, the pin stays put)
+pin_fit_ear  = 0.3;          // pin hole oversize in the ear (turns freely)
+det_r        = 10;           // click-stop radius from the pivot axis
+det_bump     = 0.75;         // bump radius on the cheek
+det_proud    = 0.5;          // how far the bump stands out of the cheek
+det_dimple   = 0.85;         // dimple radius in the ear
+det_angle    = -60;          // bump position around the axis (0 = toward the back, 90 = up)
+hbase_w      = 70;           // hinged base size
+hbase_d      = 58;
+pivot_y      = 18;           // pivot distance from the base's front edge
 
 $fn = 96;
 
@@ -120,10 +153,115 @@ module stand_world() {
             translate([-500, -500, base_t]) cube(1000);
         }
         // round off the base corners a little
-        for (sx = [-1, 1]) translate([sx*base_w/2, base_d, -1])
-            rotate([0, 0, sx > 0 ? 0 : 90]) translate([-6, -6, 0])
-                difference() { cube([7, 7, base_t + 2]); cylinder(r=6, h=base_t + 2); }
+        base_corners(base_w, base_d);
+        // cable-tie anchors: left and right where the cable leaves the side tunnel, and at the back
+        if (tie_anchors) {
+            for (sx = [-1, 1]) tie_cut(sx * 27, 10, along_x=true);
+            tie_cut(0, 42, along_x=false);
+        }
     }
+}
+
+module base_corners(w, d) {
+    for (sx = [-1, 1]) translate([sx*w/2, d, -1])
+        rotate([0, 0, sx > 0 ? 0 : 90]) translate([-6, -6, 0])
+            difference() { cube([7, 7, base_t + 2]); cylinder(r=6, h=base_t + 2); }
+}
+
+// Cable-tie anchor centred on the cable path at (x, y) in base coordinates (z = 0 on the desk).
+// along_x: the cable runs along X there, so the slots sit either side of it in Y.
+module tie_cut(x, y, along_x = true) {
+    sl = along_x ? [tie_slot[0], tie_slot[1]] : [tie_slot[1], tie_slot[0]];
+    for (s = [-1, 1]) {
+        off = s * tie_span/2;
+        translate([x + (along_x ? 0 : off) - sl[0]/2, y + (along_x ? off : 0) - sl[1]/2, -1])
+            cube([sl[0], sl[1], base_t + 2]);                                  // slot through the base
+    }
+    gl = along_x ? [tie_slot[0], tie_span + tie_slot[1]] : [tie_span + tie_slot[1], tie_slot[0]];
+    translate([x - gl[0]/2, y - gl[1]/2, -1]) cube([gl[0], gl[1], tie_groove + 1]);   // groove underneath
+}
+
+// ---------- hinged stand ----------
+neck_w = plug_w + 2*ear_t;   // neck/ear width (the cheeks sit just outside it)
+hy_p   = ring_d / 2;         // pivot depth behind the front glass plane, head coordinates
+
+// Horizontal hole along X with a teardrop point (apex_y: toward +Y, else toward +Z) so it prints
+// without support in that orientation
+module tear2d(r) { union() { circle(r=r); rotate(45) square(r); } }
+module hole_x(d, len, apex_y = true) {
+    rotate([0, 90, 0]) linear_extrude(height=len, center=true) rotate(apex_y ? 0 : 90) tear2d(d/2);
+}
+
+// Head coordinates: as the fixed stand's module coords (X width, Y back from the front glass, Z up)
+// with the pivot at (0, hy_p, 0) and the ring centre at z = head_drop.
+module hinge_head() {
+    difference() {
+        intersection() {
+            union() {
+                translate([0, 0, head_drop]) along_axis(ring_d) ring2d();
+                hull() {                                                    // neck ending in the ears
+                    translate([-neck_w/2, 0, 0]) cube([neck_w, ring_d, head_drop - 8]);
+                    translate([0, hy_p, 0]) rotate([0, 90, 0]) cylinder(r=ear_r, h=neck_w, center=true);
+                }
+            }
+            translate([-100, 0, -100]) cube(200);                           // nothing in front of the glass plane
+        }
+        // window, pocket and cap recess, as on the fixed stand
+        translate([0, -1, head_drop]) rotate([-90, 0, 0]) cylinder(d=view_d, h=ring_d + 2);
+        translate([0, -0.01, head_drop]) rotate([-90, 0, 0]) cylinder(d1=view_d + 2*lip_t, d2=view_d, h=lip_t);
+        translate([0, lip_t, head_drop]) along_axis(100) pocket2d();
+        translate([0, ring_d, head_drop]) rotate([-90, 0, 0]) cylinder(r=R_out + 0.4, h=100);
+        // plug channel from the socket down between the ears, open at the back and the bottom
+        translate([-plug_w/2, ch_y0, -ear_r - 1]) cube([plug_w, 100, head_drop + ear_r + 1]);
+        // pivot holes (teardrop pointing +Y = up when the head prints front face down)
+        translate([0, hy_p, 0]) hole_x(pin_d + pin_fit_ear, neck_w + 2, apex_y=true);
+        // click-stop dimples on both ears' outer faces, one per tilt
+        for (t = hinge_tilts, sx = [-1, 1]) {
+            a = det_angle + t;
+            translate([sx * neck_w/2, hy_p + det_r * cos(a), det_r * sin(a)]) sphere(r=det_dimple, $fn=24);
+        }
+    }
+}
+
+// Base coordinates: z = 0 on the desk, Y back from the base's front edge, pivot at (0, pivot_y, pivot_h)
+module hinge_base() {
+    cx = neck_w/2 + cheek_gap;   // cheek inner face
+    difference() {
+        union() {
+            translate([-hbase_w/2, 0, 0]) cube([hbase_w, hbase_d, base_t]);
+            for (sx = [-1, 1]) {
+                x0 = sx > 0 ? cx : -cx - cheek_t;
+                hull() {                                                    // cheek
+                    translate([x0, pivot_y - ear_r, 0]) cube([cheek_t, 2*ear_r, base_t]);
+                    translate([x0, pivot_y, pivot_h]) rotate([0, 90, 0]) cylinder(r=ear_r, h=cheek_t);
+                }
+                // click-stop bump on the inner face
+                translate([sx * (cx + det_bump - det_proud), pivot_y + det_r * cos(det_angle), pivot_h + det_r * sin(det_angle)])
+                    sphere(r=det_bump, $fn=24);
+            }
+        }
+        translate([0, pivot_y, pivot_h]) hole_x(pin_d + pin_fit_cheek, neck_w + 2*cheek_t + 4, apex_y=false);
+        base_corners(hbase_w, hbase_d);
+        if (tie_anchors) tie_cut(0, hbase_d - 12, along_x=false);           // cable runs out the back
+    }
+}
+
+// Pivot pin: snug in the cheek, turns in the ear, stops before the cable channel. Print two.
+pin_len = cheek_t + cheek_gap + ear_t - 0.5;
+module hinge_pin() {
+    cylinder(d=pin_d + 3, h=1.5);                                    // head (prints on the bed)
+    translate([0, 0, 1.5]) cylinder(d=pin_d, h=pin_len - 0.5);
+    translate([0, 0, 1.5 + pin_len - 0.5]) cylinder(d1=pin_d, d2=pin_d - 0.8, h=0.5);   // lead-in tip
+}
+
+module hinge_assembled(t) {
+    color("dimgray") hinge_base();
+    color("slategray") translate([0, pivot_y, pivot_h]) rotate([-t, 0, 0]) translate([0, -hy_p, 0]) {
+        hinge_head();
+        color("steelblue") translate([0, ring_d + cap_t, head_drop]) rotate([90, 0, 0]) cap();
+    }
+    for (sx = [-1, 1]) color("goldenrod")
+        translate([sx * (neck_w/2 + cheek_gap + cheek_t + 1.5), pivot_y, pivot_h]) rotate([0, -sx * 90, 0]) hinge_pin();
 }
 
 // Cap fit. The spigot is slightly undersized and held by six crush ribs that stand cap_fit proud
@@ -211,6 +349,14 @@ if (PART == "stand") {
     fit_test_set();
 } else if (PART == "fit_test") {
     fit_test();
+} else if (PART == "hinge_head") {
+    rotate([90, 0, 0]) hinge_head();          // front face on the bed, like the fixed stand
+} else if (PART == "hinge_base") {
+    hinge_base();                             // flat
+} else if (PART == "hinge_pin") {
+    for (sx = [-1, 1]) translate([sx * 6, 0, 0]) hinge_pin();   // two pins, head down
+} else if (PART == "hinge_both") {
+    hinge_assembled(hinge_show);
 } else {
     color("dimgray") stand_world();
     color("steelblue") rotate([-tilt, 0, 0]) translate([0, ring_d + cap_t, cz]) rotate([90, 0, 0]) cap();

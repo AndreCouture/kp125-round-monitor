@@ -6,8 +6,10 @@
 | :--- | :--- | :--- |
 | **Waveshare ESP32-S3-Touch-LCD-1.28** | The **touch** version. Round 1.28" 240×240 touch display, ESP32-S3, 16 MB flash, 2 MB PSRAM. The non-touch ESP32-S3-LCD-1.28 uses different display pins and shows a black screen with this firmware. | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1.28.htm) · [Amazon.com](https://www.amazon.com/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) · [Amazon.ca](https://www.amazon.ca/s?k=Waveshare+ESP32-S3-Touch-LCD-1.28) |
 | **TP-Link Kasa KP125M** smart plug(s) | Matter, energy monitoring, 15 A / 1800 W, 2.4 GHz Wi-Fi. One or more. | [TP-Link](https://www.tp-link.com/us/home-networking/smart-plug/kp125m/) · [Amazon.com](https://www.amazon.com/s?k=Kasa+KP125M) · [Amazon.ca](https://www.amazon.ca/s?k=Kasa+KP125M) |
-| USB-C cable + 5 V USB power adapter | The cable must carry data for flashing. The stand is designed for a **straight** USB-C plug. | Any |
-| 3D printer + PLA *(optional)* | For the desk stand. | — |
+| USB-C data cable | Must carry data (not charge-only) for flashing. The stand is designed for a **straight** USB-C plug with a rigid part of about 30 mm. | [Amazon.com](https://www.amazon.com/s?k=USB-C+data+cable+short) · [Amazon.ca](https://www.amazon.ca/s?k=USB-C+data+cable+short) |
+| 5 V USB power adapter | Any phone charger; the board draws well under 1 A. | [Amazon.com](https://www.amazon.com/s?k=5V+USB+wall+charger) · [Amazon.ca](https://www.amazon.ca/s?k=5V+USB+wall+charger) |
+| PLA filament *(optional)* | For the desk stand and cap, if you have a 3D printer. | [Amazon.com](https://www.amazon.com/s?k=PLA+filament+1.75mm) · [Amazon.ca](https://www.amazon.ca/s?k=PLA+filament+1.75mm) |
+| 3.7 V Li-ion/LiPo battery, MX1.25 2-pin *(optional)* | Plugs into the board's battery connector; the display then shows its voltage. **Check the polarity against the + and − marks on the board before connecting**: MX1.25 battery plugs are not wired the same way by every seller, and reversed polarity can destroy the board. The stand's cap has no space for a battery. | [Amazon.com](https://www.amazon.com/s?k=3.7V+lipo+battery+MX1.25+2pin) · [Amazon.ca](https://www.amazon.ca/s?k=3.7V+lipo+battery+MX1.25+2pin) |
 
 The Amazon links are searches for the exact model, so they stay current; check that the listing says **ESP32-S3-Touch-LCD-1.28** (touch) and **KP125M**.
 
@@ -107,10 +109,16 @@ At night the screen dims; the first touch only wakes it. It stays bright if tota
 
 ## 9. Print the stand
 
-- File: `stand/display_stand.scad` (OpenSCAD). Parts: `stand`, `cap`, `fit_test`, `fit_test_set`, e.g.
+- File: `stand/display_stand.scad` (OpenSCAD). Two versions share the same display ring and cap:
+  - **Fixed stand:** `stand` (tilt set before printing with `tilt`, default 15°).
+  - **Adjustable stand:** `hinge_head`, `hinge_base` and `hinge_pin` (the file prints two pins). The head clicks into 0°, 10°, 20° and 30° of backward tilt (`hinge_tilts`); tilt it by hand.
+  - Plus `cap`, and the fit tests `fit_test` / `fit_test_set`. Render one part at a time, e.g.
   ```
   openscad -o stand.stl -D 'PART="stand"' stand/display_stand.scad
+  openscad -o hinge_head.stl -D 'PART="hinge_head"' stand/display_stand.scad
   ```
+- **Hinged stand assembly:** fit the board and cap into the head, then set the head's ears between the base's cheeks and push a pin through each cheek into the ear (snug in the cheek, free in the ear). The pins stop short of the cable channel. The cable runs down between the ears and out the back of the base. The head prints front face down, the base flat, the pins standing on their heads. Click stops: a bump on each cheek drops into a dimple on the ear; set the steps no closer than 10° apart.
+- **Cable ties (optional, both stands):** pairs of slots through the base, joined by a groove underneath so the base stays flat. Thread a tie down one slot and up the other, round the cable. The fixed stand has anchors left and right of the pedestal (where the cable leaves the side tunnel) and at the back; the hinged base has one at the back. `tie_anchors = false` removes them.
 - Print **`fit_test_set`** first: three thin rings with 0.4, 0.5 and 0.6 mm clearance, marked with 1, 2 and 3 notches. Put the board in each, lens down, connector toward the pointed end, and set `clr` to the clearance that fits best (0.4 on the author's printer). Use the same printer and nozzle for the test and the stand.
 - The stand prints **front face down** with no supports except a short bridge over the cable tunnel; the cap prints flat.
 - The board sits in the ring from the back and the cap presses in behind it. The USB-C cable goes down a channel under the display and leaves through a side tunnel.
