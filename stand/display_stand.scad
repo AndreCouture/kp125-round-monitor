@@ -126,13 +126,18 @@ module stand_world() {
     }
 }
 
-// Cap fit. The spigot is slightly undersized and held by four crush ribs that stand cap_fit proud
-// of the pocket wall. Four feet continue the spigot onto the bare PCB rim (a band just inside the
+// Cap fit. The spigot is slightly undersized and held by six crush ribs that stand cap_fit proud
+// of the pocket wall. The ribs run past the spigot toward the board (rib_reach) for more grip, each
+// backed by a small fin. Four feet continue the spigot onto the bare PCB rim (a band just inside the
 // board edge that Waveshare's DXF shows free of parts) and press the board against the front lip.
 cap_fit     = 0.2;    // rib interference with the pocket wall (radial); 0.15 was slightly loose on the owner's printer
 rib_r       = 0.6;    // half-round crush rib radius
-rib_angles  = [45, 135, 225, 315];
+// On the round part of the pocket (it flares from 225 to 315 deg) and, for the extended part, at
+// angles where the DXF shows nothing at the board edge (0 and 180 hit parts, e.g. the battery connector)
+rib_angles  = [8, 45, 135, 172, 200, 340];
 pcb_back    = 5.0;    // lens front to the PCB's back face (Waveshare drawing)
+rib_reach   = stack_t - pcb_back - 0.3;   // ribs extend this far past the spigot, stopping 0.3 short of the PCB
+rib_fin_r   = 18.2;   // inner edge of the fin behind each rib (r 18.2-18.5 is clear at all rib angles in the DXF)
 foot_load   = 0.2;    // feet are this much longer than the gap, so the board is held snug
 foot_r      = [17.9, 18.7];   // radial band of the feet (on the PCB rim)
 foot_w      = 8;              // angular width of each foot, degrees (~2.5 mm)
@@ -147,9 +152,14 @@ module cap() {
         union() {
             cylinder(r=R_out, h=cap_t);                           // plate
             cylinder(d=D - 0.3, h=cap_t + spig);                  // spigot, 0.15 mm radial slip
-            for (a = rib_angles) rotate(a) translate([D/2 + cap_fit - rib_r, 0, cap_t]) {   // crush ribs
-                cylinder(r=rib_r, h=spig - 0.6);
-                translate([0, 0, spig - 0.6]) cylinder(r1=rib_r, r2=rib_r - 0.35, h=0.6);    // lead-in
+            for (a = rib_angles) rotate(a) {                                                 // crush ribs
+                rc = D/2 + cap_fit - rib_r;                   // rib centre radius
+                rib_h = spig + rib_reach;
+                translate([rc, 0, cap_t]) {
+                    cylinder(r=rib_r, h=rib_h - 0.6);
+                    translate([0, 0, rib_h - 0.6]) cylinder(r1=rib_r, r2=rib_r - 0.35, h=0.6);    // lead-in
+                }
+                translate([rib_fin_r, -rib_r, cap_t]) cube([rc - rib_fin_r, 2*rib_r, rib_h - 0.6]);   // fin
             }
             for (a = foot_angles) rotate(a - foot_w/2)                                       // feet
                 translate([0, 0, cap_t + spig - 0.01])

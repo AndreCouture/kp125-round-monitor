@@ -114,7 +114,7 @@ At night the screen dims; the first touch only wakes it. It stays bright if tota
 - Print **`fit_test_set`** first: three thin rings with 0.4, 0.5 and 0.6 mm clearance, marked with 1, 2 and 3 notches. Put the board in each, lens down, connector toward the pointed end, and set `clr` to the clearance that fits best (0.4 on the author's printer). Use the same printer and nozzle for the test and the stand.
 - The stand prints **front face down** with no supports except a short bridge over the cable tunnel; the cap prints flat.
 - The board sits in the ring from the back and the cap presses in behind it. The USB-C cable goes down a channel under the display and leaves through a side tunnel.
-- The cap holds by four crush ribs (`cap_fit`, 0.2 mm; raise it if the cap is loose, lower it if it's too hard to fit). Four feet on the cap press the bare edge of the PCB so the display can't wobble: push the cap in until you feel the feet touch the board.
+- The cap holds by six crush ribs that run about 6 mm along the pocket wall (`cap_fit`, 0.2 mm; raise it if the cap is loose, lower it if it's too hard to fit). They sit on the round part of the pocket, at angles clear of the board's edge components. Four feet on the cap press the bare edge of the PCB so the display can't wobble: push the cap in until you feel the feet touch the board.
 - The board is not round at the bottom: below the lens the PCB narrows along 45° edges to a flat bottom around the USB-C socket. The pocket follows that outline (`pcb_corners`, from Waveshare's drawing) plus `clr`.
 - `plug_straight` (default 30 mm, the rigid length of a straight USB-C plug) sets the pedestal height: measure yours.
 
