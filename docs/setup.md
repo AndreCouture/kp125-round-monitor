@@ -92,11 +92,11 @@ They are at the top of `firmware/kp125_round_display/kp125_round_display.ino`; c
 
 ## 8. Using the display
 
-**Gestures:** tap or swipe right = next page · swipe left = previous page · swipe up/down = change plug or meter where a page has several · press and hold = reset (TASK page).
+**Gestures:** tap or swipe right = next page · swipe left = previous page · swipe up/down = change plug or meter where a page has several · press and hold = reset (TASK page). The dot row at the bottom, with ◀ ▶ at its ends, shows the page; a vertical dot column on the right, with ▲ ▼, means that page has a swipe up/down choice and shows which one is selected.
 
 | Page | Shows |
 | :--- | :--- |
-| **Gauge** | Total power on an arc gauge (green below 50 % of `MAX_W`, amber to 80 %, red above), "W left" headroom, and the selected plug's power, volts and amps (swipe up/down to change plug). Dots show which plugs are online. |
+| **Gauge** | Live power on an arc gauge (green below 50 % of `MAX_W`, amber to 80 %, red above). Swipe up/down to switch between **LIVE - ALL** (all plugs added together, with the headroom left before `MAX_W` and how many plugs are online) and **LIVE - *plug name*** (that plug's watts, volts and amps, and the total for comparison). The vertical dots on the right are ALL then each plug: green = online, red = offline; the larger one is shown. |
 | **TASK** | Task meters: one for all plugs and one per plug (swipe up/down). Press and hold about 1.2 s to reset and start the meter shown. Shows energy, estimated cost, elapsed time, average and max power. Saved to flash, so it survives reboots. |
 | **TODAY** | Today's kWh and cost, plus the day's peak and lowest total power with their times. |
 | **MONTH** | This month's kWh and cost, total and per plug. |
