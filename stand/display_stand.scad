@@ -270,7 +270,7 @@ module hinge_assembled(t) {
 // of the pocket wall. The ribs run past the spigot toward the board (rib_reach) for more grip, each
 // backed by a small fin. Four feet continue the spigot onto the bare PCB rim (a band just inside the
 // board edge that Waveshare's DXF shows free of parts) and press the board against the front lip.
-cap_fit     = 0.2;    // rib interference with the pocket wall (radial); 0.15 was slightly loose on the owner's printer
+cap_fit     = 0.3;    // rib interference with the pocket wall (radial); 0.15 and 0.2 were slightly loose on the owner's printer
 rib_r       = 0.6;    // half-round crush rib radius
 // On the round part of the pocket (it flares from 225 to 315 deg) and, for the extended part, at
 // angles where the DXF shows nothing at the board edge (0 and 180 hit parts, e.g. the battery connector)
@@ -284,6 +284,8 @@ foot_w      = 8;              // angular width of each foot, degrees (~2.5 mm)
 // Cap coordinates are the back view mirrored (x -> -x). Back-view angles 20/155/200/330 deg are
 // clear in the DXF at r 18.2-18.5; in cap coordinates they are:
 foot_angles = [160, 25, 340, 210];
+foot_trim   = [0.5, 0, 0, 0.5];   // per foot, shorter by this much: on the owner's board the two feet on the
+                                  // right (seen from the back) held the cap 0.5 mm proud on that side
 
 module cap() {
     // Cap coords: +Y = top of the display, spigot points +Z (toward the board).
@@ -301,9 +303,9 @@ module cap() {
                 }
                 translate([rib_fin_r, -rib_r, cap_t]) cube([rc - rib_fin_r, 2*rib_r, rib_h - 0.6]);   // fin
             }
-            for (a = foot_angles) rotate(a - foot_w/2)                                       // feet
+            for (i = [0:len(foot_angles) - 1]) rotate(foot_angles[i] - foot_w/2)            // feet
                 translate([0, 0, cap_t + spig - 0.01])
-                    rotate_extrude(angle=foot_w) translate([foot_r[0], 0]) square([foot_r[1] - foot_r[0], foot_h + 0.01]);
+                    rotate_extrude(angle=foot_w) translate([foot_r[0], 0]) square([foot_r[1] - foot_r[0], foot_h - foot_trim[i] + 0.01]);
         }
         translate([0, 0, cap_t]) cylinder(d=D - 3.2, h=spig + 1);  // hollow spigot
         // vent slots in the plate

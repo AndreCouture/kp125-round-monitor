@@ -2,6 +2,13 @@
 
 Changes since the repository was made public. Dates are when the change reached `main`.
 
+## Unreleased
+
+### Fixed
+
+- Touch: a quick swipe could be taken as a tap (next page). The touch chip is now read about every 10 ms instead of every 50-60 ms, a touch ends only after the finger has been gone for 80 ms, and the chip's own slide detection rules out a tap. A tap now moves at most 8 px and a swipe at least 15 px; anything between is ignored.
+- Cap: the two feet on the right (seen from the back) are 0.5 mm shorter, so the cap seats flat (`foot_trim`), and the crush ribs grip harder (`cap_fit` 0.3 mm, was 0.2) because the cap was still a bit loose.
+
 ## 2026-10-08 - First public release
 
 ### Added
