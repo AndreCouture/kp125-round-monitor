@@ -29,4 +29,4 @@ Changes since the repository was made public. Dates are when the change reached 
 ### Repository
 
 - `main` requires a pull request; force-pushes and deletion are blocked.
-- Secret scanning and push protection are enabled.
+- Secret scanning, push protection and private vulnerability reporting are enabled.
