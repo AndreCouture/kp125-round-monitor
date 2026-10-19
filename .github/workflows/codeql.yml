@@ -34,6 +34,7 @@ jobs:
       - name: Build ESP32 sketches
         if: matrix.build-mode == 'manual'
         run: |
+          mkdir -p $HOME/bin
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$HOME/bin sh
           export PATH=$HOME/bin:$PATH
           arduino-cli config init
