@@ -1,0 +1,54 @@
+name: CodeQL
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build-mode: none
+          - language: c-cpp
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build ESP32 sketches
+        if: matrix.build-mode == 'manual'
+        run: |
+          mkdir -p $HOME/bin
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$HOME/bin sh
+          export PATH=$HOME/bin:$PATH
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "ArduinoJson" "LovyanGFX"
+
+          FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=enabled"
+          for sketch in firmware/kp125_monitor firmware/kp125_round_display; do
+            [ -f "$sketch/secrets.h" ] || cp "$sketch/secrets.example.h" "$sketch/secrets.h"
+            arduino-cli compile --fqbn "$FQBN" "$sketch"
+          done
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
