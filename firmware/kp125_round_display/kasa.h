@@ -140,7 +140,8 @@ static bool klapHandshake(const char* ip, KlapSession& s, String& err) {
   int semi = setCookie.indexOf(';');
   s.cookie = semi < 0 ? setCookie : setCookie.substring(0, semi);
   int t = setCookie.indexOf("TIMEOUT=");
-  uint32_t timeoutS = t < 0 ? 86400 : setCookie.substring(t + 8).toInt();
+  long timeoutS = t < 0 ? 86400 : setCookie.substring(t + 8).toInt();
+  if (timeoutS <= 0 || timeoutS > 86400) timeoutS = 86400;   // garbage, or would overflow lifeMs below
 
   // Find which credentials (and KLAP version) the plug's hash was made with
   struct Cred { const char* u; const char* p; const char* label; };
@@ -245,11 +246,13 @@ static const char* IOT_ENERGY_CMD = "{\"emeter\":{\"get_realtime\":{}}}";
 static const char* SMART_ENERGY_CMD = "{\"method\":\"get_emeter_data\"}";
 
 // Asks a plug that refused port 9999 which family it is: 2 = SMART preferring TPAP,
-// 1 = SMART (KLAP), 0 = not SMART (KLAP with legacy IOT requests)
+// 1 = SMART (KLAP), 0 = not SMART (KLAP with legacy IOT requests), -1 = no answer (ask again)
 static int smartFamily(const char* ip) {
   const char* req = "{\"method\":\"login\",\"params\":{\"sub_method\":\"discover\"}}";
   tpap::Bytes body;
-  if (tpap::post(ip, 80, "/", "application/json", (const uint8_t*)req, strlen(req), body) != 200) return 0;
+  int code = tpap::post(ip, 80, "/", "application/json", (const uint8_t*)req, strlen(req), body);
+  if (code < 0) return -1;
+  if (code != 200) return 0;
   JsonDocument d;
   if (deserializeJson(d, (const char*)body.data(), body.size()) || (d["error_code"] | -1) != 0) return 0;
   JsonObject r = d["result"];
@@ -350,6 +353,7 @@ static bool kasaReadEnergy(const char* ip, KasaConn& c, KasaEnergy& e, String& e
     if (r == 1) c.proto = KasaConn::LEGACY;
     else {                                         // port 9999 refused
       int fam = smartFamily(ip);
+      if (fam < 0) { err = "port 9999 refused, no reply to discover"; return false; }   // try again next poll
       c.proto = fam == 2 ? KasaConn::TPAP : KasaConn::KLAP;
       c.smart = fam > 0;
       reply = "";
