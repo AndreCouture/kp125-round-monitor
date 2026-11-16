@@ -1,4 +1,5 @@
 secrets.h
+.env
 out/
 *.stl
 build/

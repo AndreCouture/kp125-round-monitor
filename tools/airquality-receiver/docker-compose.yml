@@ -1,0 +1,13 @@
+services:
+  airquality-receiver:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Must match NAS_API_KEY in firmware/airquality_logger/secrets.h.
+      # Set in a git-ignored .env file next to this one (copy .env.example),
+      # not here — this file is committed.
+      API_KEY: ${API_KEY}
+    volumes:
+      - ./data:/data
