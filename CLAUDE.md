@@ -25,13 +25,19 @@ stand/airquality_enclosure.scad enclosure for the air-quality logger: box (Feath
 docs/parts-airquality-logger.md parts list, sourcing, wiring, assembly for the air-quality logger
 ```
 
-Note: the air-quality logger and its receiver are a related but separate gadget (it watches the printer's *environment*, not its power draw as a KP125 plug). They live here because they reuse this repo's TPAP/Kasa code, not because they're part of the round display.
+Note: the air-quality logger watches the printer's *environment*, not its power draw. Two build
+options, see `docs/parts-airquality-logger.md`: **merged** (recommended, cheaper — SEN55+SCD41
+wired onto two free GPIOs of the round display's own 12-pin connector, `ENABLE_AIR_QUALITY=1` in
+`kp125_round_display.ino`, no second board) or **standalone** (`firmware/airquality_logger/`, a
+second Feather ESP32 V2 — pricier, fully independent). The owner wants to possibly sell this as a
+kit: the merged path is the one worth productizing; `stand/*.scad` is currently CC-BY-NC-SA-4.0
+(non-commercial), which blocks that until changed — flagged 2026-11-16, not yet resolved.
 
 ## Current status
 | Piece | State |
 |---|---|
 | `kp125_monitor.ino` | Compiles and runs. Legacy + KLAP + TPAP + discovery; reads the owner's KP125M plugs. |
-| `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH/7 DAYS/CLOCK, cost estimate, night dimming, battery readout; `DEMO_MODE` for layout checks. Gauge steps through LIVE - ALL and each plug; vertical dots + arrows hint swipe up/down. Touch sampled every ~10 ms; tap <= 8 px, swipe >= 15 px (measured on the panel). |
+| `kp125_round_display.ino` | Compiles and runs on the touch board. LovyanGFX (replaced Arduino_GFX) with anti-aliased Inter fonts from `tools/make_vlw.py`; touch pages gauge/TASK/TODAY/MONTH/7 DAYS/CLOCK, cost estimate, night dimming, battery readout; `DEMO_MODE` for layout checks. Gauge steps through LIVE - ALL and each plug; vertical dots + arrows hint swipe up/down. Touch sampled every ~10 ms; tap <= 8 px, swipe >= 15 px (measured on the panel). Optional `ENABLE_AIR_QUALITY=1` (see `docs/parts-airquality-logger.md`): SEN55+SCD41 on a second I2C bus (GPIO17/18), queued to LittleFS, pushed to the NAS receiver — compiles clean (42% flash, needs the `app3M_fat9M_16MB` partition scheme; the default one overflows once Sensirion+LittleFS+HTTPClient link in). Default build (flag off) unaffected: 90% flash, unchanged. **Air-quality path not yet run on real hardware.** |
 | TPAP transport | Ported to the ESP32 (`tpap.h`, see `docs/tpap-design.md`); self-test (known-answer + rejection paths) passes, reads the owner's KP125M plugs live; back-off on failed logins. Reviewed by the local LLM gateway 2026-10-06 (see the design doc). |
 | `display_stand.scad` | Renders clean (OpenSCAD 2026.06, Manifold). Fixed `stand` (printed, works) and a new hinged version (`hinge_head`/`hinge_base`/`hinge_pin`, click stops at 0/10/20/30 deg; collision-checked, not yet printed). Pocket follows the board's real outline (`clr` 0.4 from `fit_test_set`); cap with six extended crush ribs (`cap_fit` 0.3) + four feet, the two right-hand ones (seen from the back) trimmed 0.5 mm via `foot_trim` (printed 2026-10-08: seats flat, holds firmly). Optional cable-tie anchors in both bases. |
 | `airquality_logger.ino` | Compiles clean against the reference target `esp32:esp32:adafruit_feather_esp32_v2` (35% flash) and also against a generic `esp32:esp32:esp32` (88% flash, tighter default partition). **Not yet wired, flashed, or run on real hardware.** Investigated the Inkbird IAQM-129-W's own app/cloud first (Tuya-backed, no supported live API or LAN protocol; manual CSV/xlsx export only, one metric at a time, hourly-at-best) before building this instead. |
