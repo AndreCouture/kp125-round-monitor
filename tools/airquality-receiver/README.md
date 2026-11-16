@@ -8,9 +8,11 @@ only — plain HTTP, a shared API key, no TLS. Don't port-forward it.
 
 1. Copy this folder onto the NAS (e.g. via the Synology `File Station` app, or
    `scp -r tools/airquality-receiver andrecouture@ds923plus:/volume1/docker/`).
-2. Edit `docker-compose.yml` and set `API_KEY` to a value you generate yourself
-   (`openssl rand -hex 16` on your Mac). Put the **same** value in
-   `firmware/airquality_logger/secrets.h` as `NAS_API_KEY`.
+2. Copy `env.example` to `.env` (same folder, git-ignored — `docker-compose.yml`
+   reads `API_KEY` from it, so the real value never lands in a commit) and set
+   `API_KEY` to a value you generate yourself (`openssl rand -hex 16` on your
+   Mac). Put the **same** value in `firmware/airquality_logger/secrets.h` as
+   `NAS_API_KEY`.
 3. In Container Manager: **Project → Create**, point it at the folder, and
    build/start it. Or from an SSH session on the NAS:
    ```

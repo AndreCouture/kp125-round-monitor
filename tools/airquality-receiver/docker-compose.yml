@@ -6,7 +6,8 @@ services:
       - "8787:8787"
     environment:
       # Must match NAS_API_KEY in firmware/airquality_logger/secrets.h.
-      # Generate your own, e.g.: openssl rand -hex 16
-      API_KEY: "change-me"
+      # Set in a git-ignored .env file next to this one (copy .env.example),
+      # not here — this file is committed.
+      API_KEY: ${API_KEY}
     volumes:
       - ./data:/data

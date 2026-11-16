@@ -15,11 +15,18 @@
 //   - ArduinoJson (v7)
 //   - Sensirion I2C SEN5X   (github.com/Sensirion/arduino-i2c-sen5x)
 //   - Sensirion I2C SCD4x   (github.com/Sensirion/arduino-i2c-scd4x)
-// Board: any ESP32 (Arduino-ESP32 core 2.x or 3.x). SD card over SPI (default VSPI pins).
 //
-// Wiring (defaults below, change to match your board):
-//   SEN55, SCD41       : I2C — SDA 21, SCL 22 (ESP32 default Wire pins), both 3.3V/GND
-//   microSD breakout   : SPI — CS 5, SCK 18, MISO 19, MOSI 23 (ESP32 default VSPI)
+// Reference build: Adafruit Feather ESP32 V2 (FQBN esp32:esp32:adafruit_feather_esp32_v2)
+// + Adalogger FeatherWing (microSD, stacked on the Feather headers) + a Sensirion SEN55
+// module on Adafruit's SEN54/SEN55 STEMMA QT adapter + an Adafruit SCD-41 STEMMA QT
+// breakout, both daisy-chained off the Feather's STEMMA QT port with STEMMA QT cables.
+// See docs/parts-airquality-logger.md for the full parts list and wiring notes.
+//
+// No wires to run for I2C or SD on that build — it's two STEMMA QT cables and the
+// FeatherWing plugs straight onto the Feather's header pins. Wire.begin() with no
+// arguments and SD.begin(SS) below pick up that board's own default pins (SDA 22 /
+// SCL 20 for STEMMA QT, SS 33 for the Adalogger's microSD CS) automatically — on a
+// different ESP32 board, override SD_CS_PIN below and check its own SDA/SCL defaults.
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -42,7 +49,7 @@
 // ---------- your settings ----------
 const uint32_t SAMPLE_MS = 15000;      // 10-30 s is plenty for this purpose
 const uint32_t FLUSH_MS  = 20000;      // how often to try pushing the queue to the NAS
-const int      SD_CS_PIN = 5;
+const int      SD_CS_PIN = SS;   // board's own default (33 on the Feather ESP32 V2 + Adalogger)
 const char*    QUEUE_PATH = "/queue.csv";
 const size_t   MAX_QUEUE_LINES_PER_FLUSH = 20;   // cap per flush so one tick can't stall on a huge backlog
 
@@ -82,7 +89,7 @@ void connectWiFi() {
 
 // ---------- sensors ----------
 void initSensors() {
-  Wire.begin();   // default SDA 21 / SCL 22
+  Wire.begin();   // no args: uses this board's own default SDA/SCL (STEMMA QT port on the Feather V2)
 
   sen5x.begin(Wire);   // void: SEN5X begin() can't itself fail, only the I2C calls after it
   uint16_t err = sen5x.deviceReset();
