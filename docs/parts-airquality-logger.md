@@ -86,9 +86,21 @@ file, not `readPlug()` as first assumed) and the partition overflow above.
 
 ### Enclosure
 
-Just `sensor_mount` from `stand/airquality_enclosure.scad` — a vented
-bracket for the SEN55 adapter + SCD41, mounted near the existing display
-stand. No second box: it's the same board.
+Two ways to mount the sensors, no second box either way since it's the same
+board:
+
+- **Built into the stand (recommended, if printing the hinged version for
+  the first time):** `display_stand.scad`'s `hinge_base` now carries an
+  optional vented `sensor_shelf` on its own — set `sensor_shelf = true`
+  (the default). One printed base, no separate part. Only applies to
+  `hinge_base`; the fixed `stand` base is already printed and left alone.
+- **Separate bracket (for a stand already printed):** `sensor_mount` from
+  `stand/airquality_enclosure.scad` — zip-tie it near the existing stand
+  instead of reprinting the base.
+
+Either way: `sen55_adapter_*`/`scd41_board_*` (or `shelf_sen55_*`/
+`shelf_scd41_*` in the stand) are unconfirmed placeholders — measure with
+calipers and tighten before trusting the fit.
 
 ## Option B: Standalone second ESP32
 

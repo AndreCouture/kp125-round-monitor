@@ -1,0 +1,285 @@
+<title>Sensor Wiring Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* layout: single-column technical brief — two diagrams, then a two-option proposal */
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #d7dae0;
+    --fg: #1b1f27;
+    --fg-dim: #5b6270;
+    --accent: #b5672f;
+    --accent-ink: #ffffff;
+    --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171c;
+      --surface: #1c1f26;
+      --border: #30343d;
+      --fg: #eceef2;
+      --fg-dim: #9aa1ad;
+      --accent: #e0905a;
+      --accent-ink: #15171c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171c;
+    --surface: #1c1f26;
+    --border: #30343d;
+    --fg: #eceef2;
+    --fg-dim: #9aa1ad;
+    --accent: #e0905a;
+    --accent-ink: #15171c;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 860px; margin: 0 auto; padding-block: 40px 64px; }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.1rem);
+    text-wrap: balance;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .dek { color: var(--fg-dim); margin: 0 0 40px; max-width: 65ch; }
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .section-note { color: var(--fg-dim); margin: 0 0 18px; max-width: 65ch; font-size: 0.95rem; }
+  section { margin-bottom: 48px; }
+  figure { margin: 0; }
+  figure svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  figcaption {
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+    margin-top: 10px;
+    max-width: 65ch;
+  }
+  .key {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--fg-dim);
+  }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .swatch.existing { background: var(--fg-dim); }
+  .swatch.new { background: var(--accent); }
+
+  .options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+  }
+  @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  .option {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 18px 20px;
+    min-width: 0;
+  }
+  .option h3 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    margin: 0 0 4px;
+  }
+  .option .tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent);
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+  }
+  .option p { color: var(--fg-dim); font-size: 0.92rem; margin: 0 0 10px; }
+  .option ul { margin: 0; padding-left: 1.1em; color: var(--fg-dim); font-size: 0.92rem; }
+  .option li { margin-bottom: 4px; }
+  .option li b { color: var(--fg); font-weight: 600; }
+
+  code {
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--border);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .recommend {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.92rem;
+    color: var(--fg);
+  }
+  .recommend b { color: var(--accent); }
+</style>
+
+<main>
+  <h1>Sensor wiring plan</h1>
+  <p class="dek">How the SEN55 and SCD41 tap into the round display's own GPIOs, what the finished setup sits like on the desk, and two ways to work a sensor mount into the stand.</p>
+
+  <section>
+    <h2>Wiring</h2>
+    <p class="section-note">One tap into the board's existing 12-pin connector. The SEN55 adapter sits in the middle of the I2C bus: it boosts power for the SEN55's fan and passes the same two wires on to the optional SCD41.</p>
+    <figure>
+      <svg viewBox="0 0 820 340" role="img" aria-label="Wiring diagram: the round display's 12-pin connector supplies 3V3, GND, and the GPIO17/GPIO18 I2C bus to the SEN55 adapter, which powers and talks to the SEN55 sensor and passes the same bus on to the optional SCD41 breakout.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+          </marker>
+        </defs>
+
+        <!-- Round display: 12-pin connector, only the 4 used pins shown -->
+        <rect x="24" y="60" width="208" height="150" rx="8" fill="none" stroke="currentColor" opacity="0.5" />
+        <text x="128" y="84" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Round display</text>
+        <text x="128" y="100" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">12-pin connector</text>
+        <g font-size="12" fill="var(--accent)">
+          <text x="44" y="126">pin 6 — 3V3</text>
+          <text x="44" y="148">pin 5 — GND</text>
+          <text x="44" y="170">pin 9 — GPIO17 (SDA)</text>
+          <text x="44" y="192">pin 10 — GPIO18 (SCL)</text>
+        </g>
+        <text x="44" y="206" font-size="10.5" fill="currentColor" opacity="0.5">other 8 pins unused here</text>
+
+        <!-- Arrows to adapter -->
+        <line x1="232" y1="118" x2="300" y2="118" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow)" />
+        <text x="266" y="110" text-anchor="middle" font-size="11" fill="var(--accent)">power</text>
+        <line x1="232" y1="182" x2="300" y2="182" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow)" />
+        <text x="266" y="174" text-anchor="middle" font-size="11" fill="var(--accent)">I2C</text>
+
+        <!-- SEN55 adapter -->
+        <rect x="304" y="86" width="178" height="128" rx="8" fill="none" stroke="var(--accent)" stroke-width="1.6" />
+        <text x="393" y="110" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">SEN55 adapter</text>
+        <text x="393" y="128" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">boosts 3V3 → 5V</text>
+        <text x="393" y="144" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">for the SEN55's fan</text>
+        <text x="393" y="164" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">passes I2C straight</text>
+        <text x="393" y="180" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">through to the bus</text>
+
+        <!-- down to SEN55 sensor -->
+        <line x1="393" y1="214" x2="393" y2="258" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow)" />
+        <text x="410" y="240" font-size="11" fill="var(--accent)">JST-GH</text>
+        <rect x="294" y="262" width="198" height="60" rx="8" fill="none" stroke="currentColor" opacity="0.5" />
+        <text x="393" y="284" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">SEN55 sensor</text>
+        <text x="393" y="302" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.6">0x69 · PM / VOC / NOx / T / RH</text>
+
+        <!-- right to SCD41 -->
+        <line x1="482" y1="130" x2="560" y2="130" stroke="currentColor" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrow)" />
+        <text x="521" y="122" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.75">I2C, same bus</text>
+        <rect x="564" y="86" width="226" height="88" rx="8" fill="none" stroke="currentColor" opacity="0.6" />
+        <text x="677" y="112" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">SCD41 breakout</text>
+        <text x="677" y="130" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">0x62 · CO2</text>
+        <text x="677" y="148" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">optional — leave it off</text>
+        <text x="677" y="164" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.65">and this reading stays blank</text>
+      </svg>
+      <div class="key">
+        <span><span class="swatch new"></span>new wiring for this feature</span>
+        <span><span class="swatch existing"></span>existing board / optional part</span>
+      </div>
+      <figcaption>Two addresses share one bus — 0x69 for the SEN55, 0x62 for the SCD41 — so nothing else on the board needs to change to add the second sensor later.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Physical layout</h2>
+    <p class="section-note">Schematic side view, not to exact scale. The sensor mount sits beside the existing stand; the four wires leave through the cap's notch that already exists for the 12-pin cable.</p>
+    <figure>
+      <svg viewBox="0 0 820 300" role="img" aria-label="Side-view sketch: the existing tilted display stand sits on the desk with a small vented sensor mount beside it, connected by a cable that exits through the cap's existing header notch.">
+        <line x1="20" y1="248" x2="800" y2="248" stroke="currentColor" opacity="0.3" />
+        <text x="20" y="266" font-size="10.5" fill="currentColor" opacity="0.5">desk surface</text>
+
+        <!-- existing stand: base + tilted head -->
+        <rect x="90" y="218" width="150" height="30" rx="3" fill="none" stroke="currentColor" opacity="0.55" />
+        <g transform="translate(165,218) rotate(-15)">
+          <rect x="-58" y="-130" width="116" height="130" rx="10" fill="none" stroke="currentColor" opacity="0.55" />
+          <circle cx="0" cy="-70" r="46" fill="none" stroke="currentColor" opacity="0.55" />
+          <!-- header notch in the cap, already there -->
+          <rect x="-10" y="-130" width="20" height="10" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.4" />
+        </g>
+        <text x="165" y="266" text-anchor="middle" font-size="11.5" fill="currentColor">existing stand</text>
+        <text x="165" y="280" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">display_stand.scad</text>
+        <text x="200" y="98" font-size="10.5" fill="var(--accent)">hdr_notch</text>
+        <text x="200" y="111" font-size="10" fill="currentColor" opacity="0.55">(already in the cap)</text>
+        <line x1="198" y1="104" x2="178" y2="92" stroke="var(--accent)" stroke-width="1" />
+
+        <!-- cable from notch to sensor mount -->
+        <path d="M 178 92 C 320 40, 480 60, 560 190" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" />
+        <text x="420" y="58" text-anchor="middle" font-size="11" fill="var(--accent)">4-wire tap</text>
+        <text x="420" y="72" text-anchor="middle" font-size="10" fill="var(--accent)" opacity="0.8">3V3 / GND / SDA / SCL</text>
+
+        <!-- sensor mount -->
+        <rect x="520" y="192" width="200" height="56" rx="8" fill="none" stroke="var(--accent)" stroke-width="1.6" />
+        <g stroke="var(--accent)" stroke-width="1" opacity="0.6">
+          <line x1="538" y1="202" x2="538" y2="238" />
+          <line x1="552" y1="202" x2="552" y2="238" />
+          <line x1="566" y1="202" x2="566" y2="238" />
+          <line x1="650" y1="202" x2="650" y2="238" />
+          <line x1="664" y1="202" x2="664" y2="238" />
+          <line x1="678" y1="202" x2="678" y2="238" />
+        </g>
+        <text x="620" y="266" text-anchor="middle" font-size="11.5" fill="currentColor">sensor mount</text>
+        <text x="620" y="280" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">vented — airflow, not a sealed box</text>
+      </svg>
+      <figcaption>The sensor mount's vent slots (sketched as the short tick marks) are what let the SEN55's fan actually draw room air, same reason it can't go inside a closed enclosure.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Working the sensor mount into the stand</h2>
+    <p class="section-note">Done, for the hinged base — it hadn't been printed yet, so there was no reason to bolt the sensors on separately later. The fixed base, already printed and working, was left alone.</p>
+
+    <div class="options">
+      <div class="option">
+        <span class="tag">Built — hinge_base, not yet printed</span>
+        <h3>Extend the base</h3>
+        <p><code>sensor_shelf</code> in <code>display_stand.scad</code>: a vented shelf unioned onto <code>hinge_base</code>'s right edge, clear of the pivot cheeks. Renders clean (manifold, checked by PNG preview too).</p>
+        <ul>
+          <li>One printed base, no second part.</li>
+          <li>Zip-tie anchors for both boards, reusing the same <code>tie_cut</code> pattern already in the file.</li>
+          <li><code>shelf_sen55_*</code>/<code>shelf_scd41_*</code> are still unconfirmed placeholders — measure with calipers before the first real print.</li>
+        </ul>
+      </div>
+      <div class="option">
+        <span class="tag">For the fixed base already printed</span>
+        <h3>Clip-on accessory</h3>
+        <p>For the fixed <code>stand</code> base sitting on the desk now, not the hinged one: <code>sensor_mount</code> from <code>airquality_enclosure.scad</code> stays a separate part, zip-tied near it.</p>
+        <ul>
+          <li>No reprint of the fixed base needed.</li>
+          <li>Reads as an add-on next to the stand, not one piece.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="recommend">
+      Printing the hinged version now gets the shelf built in. The fixed base already on the desk keeps the separate <code>sensor_mount</code> bracket — reprinting it just to add a shelf wasn't worth it.
+    </div>
+  </section>
+</main>

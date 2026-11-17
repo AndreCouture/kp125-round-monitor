@@ -9,6 +9,14 @@
 // STATUS: renders clean (manifold), NOT yet test-printed. Board numbers come from Waveshare's
 // dimension drawing / DXF for this board (wiki: ESP32-S3-Touch-LCD-1.28.zip), not calipers.
 // Print PART="fit_test" (a few-minute ring) before printing the full stand.
+//
+// hinge_base also carries an optional sensor_shelf (set sensor_shelf=false to omit): a vented
+// shelf for the air-quality add-on's SEN55 adapter + SCD41, unioned onto the base's right edge,
+// clear of the pivot cheeks. Added before this part's first print specifically so it didn't need
+// a separate bolt-on later — see docs/parts-airquality-logger.md. shelf_sen55_*/shelf_scd41_*
+// are unconfirmed placeholders, same as airquality_enclosure.scad's sensor_mount; measure with
+// calipers and tighten before trusting the fit. The fixed "stand" base is untouched (already
+// printed and working) — this only applies to hinge_base.
 
 PART = "both";       // "stand", "cap", "hinge_head", "hinge_base", "hinge_pin", "hinge_both" (preview),
                      // "fit_test", "fit_test_set" (clr 0.4/0.5/0.6 = 1/2/3 notches), or "both" (fixed-stand preview)
@@ -58,6 +66,27 @@ tie_slot     = [4.5, 2.0];   // slot length along the cable x width; fits ties u
 tie_span     = 11;           // slot-to-slot distance across the cable
 tie_groove   = 1.5;          // depth of the groove under the base
 
+// ---------- sensor shelf (optional, hinge_base only) ----------
+// Air-quality add-on (docs/parts-airquality-logger.md): a vented shelf unioned onto the hinged
+// base's right edge for the SEN55 adapter + SCD41, so they don't need a separate loose
+// sensor_mount part. Only on hinge_base — that's the version not printed yet; the fixed "stand"
+// base is already printed and working, left alone rather than redesigned around an unprinted part.
+// shelf_sen55_*/shelf_scd41_* are PLACEHOLDERS, same unconfirmed numbers as
+// stand/airquality_enclosure.scad's sensor_mount (no published dimension found for either board at
+// design time) — measure with calipers and tighten before trusting the fit.
+sensor_shelf    = true;
+shelf_sen55_w   = 18;
+shelf_sen55_l   = 26;
+shelf_scd41_w   = 23;
+shelf_scd41_l   = 26;
+shelf_gap       = 4;     // gap between the two board slots
+shelf_wall      = 1.6;
+shelf_vent_w    = 2.5;   // vent slot width (airflow for the SEN55's fan)
+shelf_vent_pitch= 5;
+shelf_w  = shelf_sen55_w + shelf_scd41_w + shelf_gap + shelf_wall * 3;
+shelf_l  = max(shelf_sen55_l, shelf_scd41_l) + shelf_wall * 2;
+// shelf_y0 (needs hbase_d, defined further down in "hinged stand") is set there, not here.
+
 // ---------- hinged stand (PART "hinge_head", "hinge_base", "hinge_pin", "hinge_both") ----------
 // The head (display ring + neck + two side ears) pivots between two cheeks on the base and clicks
 // into hinge_tilts: a bump on each cheek drops into one of the dimples on the ear.
@@ -80,6 +109,7 @@ det_angle    = -60;          // bump position around the axis (0 = toward the ba
 hbase_w      = 70;           // hinged base size
 hbase_d      = 58;
 pivot_y      = 18;           // pivot distance from the base's front edge
+shelf_y0     = (hbase_d - shelf_l) / 2;   // sensor shelf, centred on the base's depth
 
 $fn = 96;
 
@@ -241,11 +271,35 @@ module hinge_base() {
                 translate([sx * (cx + det_bump - det_proud), pivot_y + det_r * cos(det_angle), pivot_h + det_r * sin(det_angle)])
                     sphere(r=det_bump, $fn=24);
             }
+            if (sensor_shelf) sensor_shelf_solid(shelf_y0);
         }
         translate([0, pivot_y, pivot_h]) hole_x(pin_d + pin_fit_cheek, neck_w + 2*cheek_t + 4, apex_y=false);
         base_corners(hbase_w, hbase_d);
         if (tie_anchors) tie_cut(0, hbase_d - 12, along_x=false);           // cable runs out the back
+        if (sensor_shelf) {
+            sensor_shelf_vents(shelf_y0);
+            // Zip-tie anchors: one pair holding each board onto the shelf, plus one more where the
+            // 4-wire tap crosses from the base's main area onto the shelf, so the run stays flush.
+            tie_cut(hbase_w/2 + shelf_wall + shelf_sen55_w/2, shelf_y0 + shelf_l/2, along_x = false);
+            tie_cut(hbase_w/2 + shelf_w - shelf_wall - shelf_scd41_w/2, shelf_y0 + shelf_l/2, along_x = false);
+            tie_cut(hbase_w/2 - 5, hbase_d/2, along_x = true);
+        }
     }
+}
+
+// ---------- sensor shelf geometry (hinge_base only — see "sensor shelf" variables above) ----------
+// Floor slab, unioned onto the base's right edge (x = hbase_w/2 .. hbase_w/2 + shelf_w). Clear of
+// the pivot cheeks (which sit near the base's centre, not its outer edge) at any shelf_l this size.
+module sensor_shelf_solid(y0) {
+    translate([hbase_w/2, y0, 0]) cube([shelf_w, shelf_l, base_t]);
+}
+
+// Vent slots through the shelf floor — airflow matters more here than a snug pocket, same
+// reasoning as airquality_enclosure.scad's sensor_mount.
+module sensor_shelf_vents(y0) {
+    for (x = [hbase_w/2 + 4 : shelf_vent_pitch : hbase_w/2 + shelf_w - 4])
+        translate([x, y0 + shelf_l/2, -1])
+            cube([shelf_vent_w, shelf_l - 6, base_t + 2], center = true);
 }
 
 // Pivot pin: snug in the cheek, turns in the ear, stops before the cable channel. Print two.
