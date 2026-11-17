@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: CC-BY-NC-SA-4.0
 // Copyright (c) 2026 12113775 Canada Inc. Non-commercial use only; credit required. See LICENSE.
-// Enclosure for firmware/airquality_logger's electronics (Adafruit Feather ESP32 V2 stacked
-// with an Adalogger FeatherWing), plus a separate open, vented bracket for the two STEMMA QT
-// sensor boards (SEN55 adapter + SCD41), which need real airflow and must NOT go in a sealed box.
-// Parts list and wiring: docs/parts-airquality-logger.md
+//
+// Two unrelated builds share this file:
+//   - sensor_mount: the SEN55 adapter + SCD41, in an open vented bracket (they need real
+//     airflow and must NOT go in a sealed box). Needed by BOTH builds below.
+//   - box/lid/fit_test: an enclosure for a *second*, standalone ESP32 (Adafruit Feather ESP32
+//     V2 + Adalogger FeatherWing) — only needed for firmware/airquality_logger, the pricier
+//     separate-board build. If you merged the sensors into kp125_round_display.ino instead
+//     (ENABLE_AIR_QUALITY=1, the cheaper, recommended path — see docs/parts-airquality-logger.md),
+//     you do NOT need box/lid/fit_test: there's no second board, and the round display already
+//     has its own stand from display_stand.scad.
 //
 // Open in OpenSCAD, set PART, F6 to render, F7 to export STL.
 // All dimensions in mm.

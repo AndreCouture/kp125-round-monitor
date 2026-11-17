@@ -1,91 +1,137 @@
 # Air-quality logger — parts, wiring, assembly
 
-Companion hardware for `firmware/airquality_logger/`. Built around STEMMA QT
-(Adafruit's I2C connector standard) and Adafruit's Feather/FeatherWing stacking
-headers specifically so there's no soldering beyond the usual header pins, and
-no hand-wired I2C or SPI bus to get wrong.
+Two ways to build this. **Merged** reuses the round display's own ESP32-S3 —
+cheaper, one board to place near the printer, no second enclosure. **Standalone**
+is a second, independent ESP32 — pricier, but fully portable on its own.
 
-## Parts list
+Start with Merged unless you specifically want a second, separate unit.
 
-Prices are rough and change often — check the live page before ordering.
-DigiKey and Mouser both ship to Canada; Adafruit's own store does too, with
-longer transit but no reseller markup.
+## Option A: Merged into the round display (recommended)
+
+The round display's touch/IMU I2C bus isn't exposed off-board, but its
+documented 12-pin connector carries six genuinely free GPIOs — confirmed
+directly from Waveshare's schematic (`ESP32-S3-Touch-LCD-1.28-Sch.pdf`), not
+assumed. `firmware/kp125_round_display/kp125_round_display.ino` uses two of
+them (GPIO17/18) as a second, independent I2C bus for the sensors, built
+behind `ENABLE_AIR_QUALITY` so it does nothing unless you turn it on.
+
+### Parts
 
 | Part | Why | Source | ~Price (CAD) |
 |---|---|---|---|
-| Sensirion **SEN55-SDN-T** (bare sensor module) | PM1.0/2.5/4.0/10, VOC index, NOx index, temp, humidity — the main sensor | [DigiKey.ca](https://www.digikey.ca/en/products/detail/sensirion-ag/SEN55-SDN-T/16342756) | ~$49 |
-| Adafruit **SEN54/SEN55 Adapter Breakout** (STEMMA QT/Qwiic, PID 5964) | Converts the SEN55's 6-pin JST GH connector to STEMMA QT | DigiKey (search "Adafruit 5964") or [Adafruit](https://www.adafruit.com/product/5964) | ~$8 |
-| Adafruit **SCD-41** STEMMA QT breakout (PID 5190) | CO2, with its own temp/humidity too | [Adafruit](https://www.adafruit.com/product/5190) (no DigiKey/Mouser stock found at review time — check again) | ~$55 |
-| Adafruit **Feather ESP32 V2** STEMMA QT (PID 5400) | The MCU — built-in STEMMA QT port, Wi-Fi, stacking headers for the FeatherWing below | DigiKey part **1528-5400-ND** | ~$35 |
-| Adafruit **Adalogger FeatherWing** (RTC + microSD, PID 2922) | Stacks straight onto the Feather's headers — this is the "SD card wiring," no separate breakout or SPI wires | [Adafruit](https://www.adafruit.com/products/2922) | ~$13 |
-| microSD card, any small capacity (4–16 GB) | The queue buffer only needs a few MB/day — nothing fills it | any electronics or computer shop | ~$10 |
-| STEMMA QT cable, 100 mm, qty 2 (often sold as a 4-pack, PID 4209) | Feather → SEN55 adapter → SCD41, daisy-chained | [Adafruit](https://www.adafruit.com/product/4209) or DigiKey | ~$6 |
-| USB-C cable + 5V/1A+ wall adapter | Power, left plugged in near the printer | anything on hand | — |
-| CR1220 coin cell (optional) | Keeps the Adalogger's RTC ticking across power loss — not required, since the sketch gets its clock from NTP at boot anyway | any shop | ~$3 |
+| Sensirion **SEN55-SDN-T** (bare module) | PM1.0/2.5/4.0/10, VOC index, NOx index, temp, humidity | [DigiKey.ca](https://www.digikey.ca/en/products/detail/sensirion-ag/SEN55-SDN-T/16342756) | ~$49 |
+| Adafruit **SEN54/SEN55 Adapter Breakout** (PID 5964) | Converts the SEN55's JST-GH connector to plain pins, **and** boosts whatever you feed it (3.3–5V) up to a clean 5V/100mA for the SEN55's fan — this is why it's worth keeping even without STEMMA QT elsewhere | [Adafruit](https://www.adafruit.com/product/5964) or DigiKey (search "Adafruit 5964") | ~$8 |
+| Sensirion **SCD-41** breakout, *optional* (CO2) | Adafruit's (PID 5190) is the known-good one; a cheaper generic breakout works too if it exposes plain I2C pins | [Adafruit](https://www.adafruit.com/product/5190) | ~$55, or less generic |
+| JST-GH 1.0mm 6-pin to loose-wire pigtail cable | Comes with most Sensirion eval boards; buy separately if not included with the SEN55 | any Sensirion/Adafruit reseller | ~$3–5 |
+| A short length of wire + a connector matching the board's 12-pin SH1.0 cable (or just splice in) | Taps `3V3`, `GND`, `GPIO17` (SDA), `GPIO18` (SCL) off the existing cable | any electronics shop | ~$3 |
 
-**Total: roughly $170–180 CAD**, most of it the two Sensirion-made sensors.
+**Total: ~$60 CAD without CO2, ~$115 CAD with it** — no second MCU, no second
+enclosure box.
 
-If the SCD41 breakout turns out hard to source, the sketch runs fine without
-it — `scd41Ok` just stays false and the CO2 column logs as blank. You lose
-CO2, keep everything else.
+### Wiring
 
-## Wiring
+The board's 12-pin cable, pin by pin (confirmed from the schematic):
+```
+1: GND   2: VSYS   3: RUN/RESET   4: BOOT/GPIO0   5: GND   6: ADC_AVDD/3V3
+7: GPIO15   8: GPIO16   9: GPIO17   10: GPIO18   11: GPIO21   12: GPIO33
+```
 
-With this specific combo, there's no point-to-point wiring to do:
+1. Power the SEN55 adapter from pin **6 (3V3)** and **5 or 1 (GND)**. The
+   adapter's own boost converter handles the SEN55 fan's 5V need — this is
+   why dropping it in favour of a bare-wired SEN55 isn't worth the ~$8
+   saved, unless you've confirmed `VSYS` (pin 2) is a steady 5V on your
+   build with a multimeter (it tracks the battery-charger IC's output, not
+   guaranteed — see the firmware comment next to `AIR_SDA`/`AIR_SCL`).
+2. Wire the adapter's SDA/SCL to **pin 9 (GPIO17)** / **pin 10 (GPIO18)**.
+3. If adding the SCD41, daisy-chain it off the same SDA/SCL/3V3/GND (address
+   `0x62`, no conflict with the SEN55's `0x69`).
+4. No SD card needed — the firmware buffers to the board's own internal
+   flash (LittleFS) when the NAS is unreachable.
 
-1. **Stack the Adalogger FeatherWing** directly onto the Feather ESP32 V2's
-   header pins (both have matching Feather-standard headers — it just plugs
-   on top). This gives the Feather a microSD slot on its SPI bus, chip-select
-   on GPIO 33 automatically (the sketch's `SD_CS_PIN` is set to `SS`, which
-   resolves to the right pin for this board).
-2. **STEMMA QT cable** from the Feather's STEMMA QT port to the SEN55
-   adapter's **IN** STEMMA QT port.
-3. **STEMMA QT cable** from the SEN55 adapter's **OUT** port to the SCD41
-   breakout's STEMMA QT port. (SEN55 is on I2C address `0x69`, SCD41 on
-   `0x62` — no address conflict, so they daisy-chain on the same bus.)
-4. **Insert the microSD card** into the Adalogger's slot before powering on.
-5. Power the whole stack over the Feather's USB-C port.
+### Firmware
 
-That's the entire build: two cables, one board stacked on another, one card
-inserted. No breadboard, no loose GPIO wires.
+Build `kp125_round_display.ino` with
+`--build-property "compiler.cpp.extra_flags=-DENABLE_AIR_QUALITY=1"` (or set
+`ENABLE_AIR_QUALITY` to `1` directly in the sketch), **and switch the FQBN's
+partition scheme** — the default one has no room once Sensirion's libraries,
+LittleFS and HTTPClient link in (confirmed by actually overflowing it: 101%
+of a 1.3MB app partition). Use:
+```
+esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=enabled
+```
+which gives a 3MB app partition on this board's real 16MB flash — 42% used
+with air quality on, comfortable headroom. Building *without*
+`ENABLE_AIR_QUALITY` doesn't need this change (90% of the default 1.3MB
+partition, same as before this feature existed).
 
-## Firmware note
+In `secrets.h`, add:
+```c
+#define NAS_INGEST_URL "http://ds923plus:8787/ingest"
+#define NAS_API_KEY    "<same value as tools/airquality-receiver's .env>"
+#define AIR_DEVICE_ID  "printroom1"
+```
+And make sure `AIR_PRINTER_PLUG_NAME` (near the top of the sketch) matches
+the exact name you gave the printer's plug in `PLUGS_INIT` — the firmware
+reads that plug's already-polled wattage rather than opening a second TPAP
+session to the same plug.
 
-`airquality_logger.ino` targets FQBN `esp32:esp32:adafruit_feather_esp32_v2`
-for this build. `Wire.begin()` with no arguments and `SD.begin(SS)` both pick
-up this board's own default pins — verified against the installed board
-package's `pins_arduino.h` (`SDA=22, SCL=20, SS=33` on this variant), not
-assumed from a generic ESP32 devkit's pinout.
+**Verified:** compiled clean both ways — `ENABLE_AIR_QUALITY` left at its
+default (0, real `secrets.h` untouched, 90% flash on the default partition,
+unaffected) and set to 1 (isolated test copy, placeholder `secrets.h`, 42%
+flash on the `app3M_fat9M_16MB` partition). Caught and fixed two real bugs
+along the way: an Arduino auto-prototype ordering issue (the `AirSample`
+struct had to move before `rgb()` — the actual first function in the whole
+file, not `readPlug()` as first assumed) and the partition overflow above.
+**Not yet wired to real sensors or run with the feature actually on.**
 
-## Placement
+### Enclosure
 
-Mount it near the printer but not directly in the nozzle exhaust or a cooling
-fan's draft — ambient room/enclosure air is what you want. The SEN55 has its
-own small aspirating fan, so don't block its inlet or exhaust vents.
+Two ways to mount the sensors, no second box either way since it's the same
+board:
 
-## Enclosure
+- **Built into the stand (recommended, if printing the hinged version for
+  the first time):** `display_stand.scad`'s `hinge_base` now carries an
+  optional vented `sensor_shelf` on its own — set `sensor_shelf = true`
+  (the default). One printed base, no separate part. Only applies to
+  `hinge_base`; the fixed `stand` base is already printed and left alone.
+- **Separate bracket (for a stand already printed):** `sensor_mount` from
+  `stand/airquality_enclosure.scad` — zip-tie it near the existing stand
+  instead of reprinting the base.
 
-`stand/airquality_enclosure.scad` — renders clean (OpenSCAD 2026.06, Manifold
-backend, checked manifold + visually via PNG preview), **not yet
-test-printed**. Three parts:
+Either way: `sen55_adapter_*`/`scd41_board_*` (or `shelf_sen55_*`/
+`shelf_scd41_*` in the stand) are unconfirmed placeholders — measure with
+calipers and tighten before trusting the fit.
 
-- `box` — friction-fit tray + lid for the Feather + Adalogger FeatherWing
-  stack, with a USB-C cable slot and a slot for the two STEMMA QT cables
-  leaving to the sensors.
-- `sensor_mount` — a separate, deliberately open/vented bracket for the SEN55
-  adapter + SCD41 breakout, with cable-tie anchors. These two **cannot go in
-  the sealed box** — the SEN55 has its own aspirating fan and both sensors
-  need real ambient air, not trapped box air — so they get a perforated tray
-  instead.
-- `fit_test` — a short collar + matching ribbed plug; print this first and
-  check the press-fit by hand before committing to the full box (same role
-  as `display_stand.scad`'s `fit_test`).
+## Option B: Standalone second ESP32
 
-`feather_w`/`feather_l`/`feather_t` and the Adalogger's `wing_*` dimensions
-come from Adafruit's own published specs for these exact products — fairly
-solid. **`sen55_adapter_*` and `scd41_board_*` are placeholders** — no
-confirmed dimension was found for those two specific breakout boards at
-design time, which is why `sensor_mount` is a loose perforated tray with wide
-tolerances rather than a snug pocket. Measure both with calipers once they're
-in hand and tighten those variables for a tidier fit — same workflow this
-project already uses for `display_stand.scad`'s `board_d`/`stack_t`.
+For a fully separate, portable unit — its own MCU, its own enclosure. Pricier
+(~$170–180 CAD) because it duplicates what the round display already has
+(a Wi-Fi MCU, a stand).
+
+| Part | Why | Source | ~Price (CAD) |
+|---|---|---|---|
+| Sensirion **SEN55-SDN-T** (bare module) | Main sensor | [DigiKey.ca](https://www.digikey.ca/en/products/detail/sensirion-ag/SEN55-SDN-T/16342756) | ~$49 |
+| Adafruit **SEN54/SEN55 Adapter Breakout** (PID 5964) | STEMMA QT + fan power | [Adafruit](https://www.adafruit.com/product/5964) | ~$8 |
+| Adafruit **SCD-41** breakout (PID 5190) | CO2, optional | [Adafruit](https://www.adafruit.com/product/5190) | ~$55 |
+| Adafruit **Feather ESP32 V2** (PID 5400) | MCU, STEMMA QT port | DigiKey **1528-5400-ND** | ~$35 |
+| Adafruit **Adalogger FeatherWing** (PID 2922) | microSD, stacks on the Feather | [Adafruit](https://www.adafruit.com/products/2922) | ~$13 |
+| microSD card (4–16 GB) | Queue buffer | any shop | ~$10 |
+| STEMMA QT cable ×2 | Feather → SEN55 adapter → SCD41 | [Adafruit](https://www.adafruit.com/product/4209) | ~$6 |
+
+Wiring, firmware target, and the `box`/`lid`/`fit_test` enclosure parts are
+all in `firmware/airquality_logger/` and `stand/airquality_enclosure.scad` —
+see those files' own header comments. Compiles clean against
+`esp32:esp32:adafruit_feather_esp32_v2` (35% flash). Not yet wired, flashed,
+or test-printed.
+
+## Both options
+
+Mount sensors near the printer but not in the direct nozzle exhaust or a
+cooling fan's draft — ambient room air is what you want. The SEN55 has its
+own aspirating fan; don't block its inlet or exhaust vents.
+
+## Licensing note
+
+`stand/*.scad` is currently CC-BY-NC-SA-4.0 (**non-commercial use only**). If
+this is going to be sold as a kit, that license needs to change before it
+ships to anyone — flagged, not yet resolved.
